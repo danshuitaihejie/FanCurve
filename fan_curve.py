@@ -853,9 +853,11 @@ class TerminalUI:
             if self.smoothed is not None:
                 self.history.append(self.smoothed)
         except (FanError, OSError, ValueError) as error:
+            was_controlling = self.active or self.owns_fans
             self.message = str(error)
             self.error = True
-            self.enable_error = self.message
+            if was_controlling:
+                self.enable_error = self.message
             self.sample = None
             self.smoothed = None
             self.active = False
@@ -959,7 +961,9 @@ class TerminalUI:
         if self.notice_error:
             return ("设置未保存 · 曲线未生效", "[c] 修改设置", self.notice or self.message, "error")
         if self.sample is None:
-            return ("读取中或读取失败 · 曲线未生效", "[a] 开启自动调速（读取成功后可用）", self.message, "inactive")
+            if self.error:
+                return ("读取失败 · 曲线未生效", "请检查硬件读数后重试", self.message, "error")
+            return ("正在读取 · 曲线未生效", "[a] 开启自动调速（读取成功后可用）", self.message, "inactive")
         if any(f.mode != 0 for f in self.sample.fans):
             return ("其他程序正在控制风扇 · 曲线未生效", "请先退出其他风扇调速程序", self.message, "error")
         action = "[a] 开启模拟自动调速（无需授权）" if self.demo else "[a] 授权并开启自动调速"

@@ -231,6 +231,24 @@ class SessionTests(unittest.TestCase):
 
 
 class TerminalUITests(unittest.TestCase):
+    def test_monitor_read_failure_is_not_reported_as_enable_failure(self):
+        class BrokenHardware:
+            owns_fans = False
+
+            def sample(self):
+                raise fc.FanError("AppleSMC 读取失败")
+
+            def close(self):
+                pass
+
+        ui = fc.TerminalUI(demo=True)
+        ui.hardware = BrokenHardware()
+        ui.refresh(0)
+        banner = ui.status_banner()
+        self.assertEqual(banner[0], "读取失败 · 曲线未生效")
+        self.assertIn("AppleSMC 读取失败", banner[2])
+        self.assertNotIn("启用失败", banner[0])
+
     def test_enable_failure_banner_survives_normal_monitor_refresh(self):
         ui = fc.TerminalUI(demo=True)
         ui.accept({"ok": False, "active": False, "owns_fans": False,
