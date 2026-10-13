@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.work/
+.fancurve.json
+.fancurve.tmp
+.DS_Store
