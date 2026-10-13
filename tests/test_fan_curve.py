@@ -1,6 +1,8 @@
 import math
+import itertools
 import struct
 import unittest
+from unittest.mock import patch
 
 import fan_curve as fc
 
@@ -228,9 +230,38 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(hardware.restore_count, 0)
 
 
+class TerminalUITests(unittest.TestCase):
+    def test_enable_failure_banner_survives_normal_monitor_refresh(self):
+        ui = fc.TerminalUI(demo=True)
+        ui.accept({"ok": False, "active": False, "owns_fans": False,
+                   "message": "SMC 未确认写入：风扇1目标2400回读1800 RPM"})
+        before = ui.status_banner()
+        ui.refresh(0)
+        after = ui.status_banner()
+        self.assertEqual(before[3], "error")
+        self.assertEqual(after[0], "启用失败 · 曲线未生效")
+        self.assertIn("SMC 未确认写入", after[2])
+        self.assertEqual(after[3], "error")
+
+    def test_invalid_settings_error_banner_survives_monitor_refresh(self):
+        ui = fc.TerminalUI(demo=True)
+        ui.refresh(0)
+        ui.edit = fc.Config(start=34)
+        ui.edit_key(10)
+        banner = ui.status_banner()
+        self.assertEqual(banner[0], "设置未保存 · 曲线未生效")
+        self.assertIn("设置错误", banner[2])
+        self.assertNotIn("启用失败", banner[0])
+        ui.refresh(2)
+        after_refresh = ui.status_banner()
+        self.assertEqual(after_refresh[0], "设置未保存 · 曲线未生效")
+        self.assertIn("设置错误", after_refresh[2])
+
+
 class TypedFakeSMC:
     def __init__(self, target_type="flt ", ignore_auto_target=False,
-                 fail_target_once_after_manual=False, legacy=False, gpu_initial=None):
+                 fail_target_once_after_manual=False, legacy=False, gpu_initial=None,
+                 stale_target_reads=0, never_confirm_target=False):
         self.kinds = {"F0Tg": target_type}
         self.values = {
             "FNum": 1, "TC1C": 55.0, "F0Mn": 1000.0, "F0Mx": 3000.0,
@@ -246,6 +277,9 @@ class TypedFakeSMC:
         self.fail_cpu = False
         self.ignore_auto_target = ignore_auto_target
         self.fail_target_once_after_manual = fail_target_once_after_manual
+        self.stale_target_reads = stale_target_reads
+        self.never_confirm_target = never_confirm_target
+        self.pending_target = None
 
     def read(self, key):
         if key == "TC1C" and self.fail_cpu:
@@ -258,6 +292,15 @@ class TypedFakeSMC:
             raise fc.FanError("unknown key")
         value = self.values[key]
         if key == "F0Tg":
+            if self.pending_target is not None:
+                if self.never_confirm_target:
+                    pass
+                elif self.stale_target_reads > 0:
+                    self.stale_target_reads -= 1
+                else:
+                    self.values[key] = self.pending_target
+                    self.pending_target = None
+                    value = self.values[key]
             raw = fc.encode_number(self.kinds[key], value)
             return fc.decode_number(self.kinds[key], raw)
         return value
@@ -272,7 +315,11 @@ class TypedFakeSMC:
                 self.fail_target_once_after_manual = False
                 raise fc.FanError("模拟目标写入失败")
             raw = fc.encode_number(self.kinds[key], value)
-            self.values[key] = fc.decode_number(self.kinds[key], raw)
+            encoded_value = fc.decode_number(self.kinds[key], raw)
+            if self.stale_target_reads or self.never_confirm_target:
+                self.pending_target = encoded_value
+            else:
+                self.values[key] = encoded_value
         else:
             self.values[key] = value
 
@@ -313,6 +360,30 @@ class HardwareTests(unittest.TestCase):
             hardware.apply([2400])
         self.assertTrue(hardware.owns_fans)
         self.assertEqual(smc.read("F0Md"), 1)
+        hardware.restore()
+        self.assertEqual(smc.read("F0Md"), 0)
+        self.assertFalse(hardware.owns_fans)
+
+    def test_apply_retries_stale_readback_until_firmware_updates(self):
+        smc = TypedFakeSMC(stale_target_reads=3)
+        hardware = fc.Hardware(smc)
+        clock = itertools.count()
+        with patch("fan_curve.time.monotonic", side_effect=lambda: next(clock) / 100), \
+             patch("fan_curve.time.sleep"):
+            hardware.apply([2400])
+        self.assertEqual(smc.read("F0Md"), 1)
+        self.assertEqual(smc.read("F0Tg"), 2400)
+        self.assertTrue(hardware.owns_fans)
+
+    def test_unconfirmed_readback_reports_values_and_can_be_restored(self):
+        smc = TypedFakeSMC(never_confirm_target=True)
+        hardware = fc.Hardware(smc)
+        clock = itertools.count()
+        with patch("fan_curve.time.monotonic", side_effect=lambda: next(clock) / 5), \
+             patch("fan_curve.time.sleep"):
+            with self.assertRaisesRegex(fc.FanError, r"风扇1.*目标2400.*回读1800.*模式1"):
+                hardware.apply([2400])
+        self.assertTrue(hardware.owns_fans)
         hardware.restore()
         self.assertEqual(smc.read("F0Md"), 0)
         self.assertFalse(hardware.owns_fans)

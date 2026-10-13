@@ -355,9 +355,24 @@ class Hardware:
                 self.smc.write("FS! ", manual)
         for i, target in enumerate(targets):
             self.smc.write(f"F{i}Tg", target)
-        applied = self.sample()
-        if any(f.mode != 1 or abs(f.target - target) > 150 for f, target in zip(applied.fans, targets)):
-            raise FanError("SMC 未确认目标转速，自动模式已停止。")
+        # The SMC may report the previous value briefly after a successful write.
+        # Bound confirmation well below the client timeout and keep ownership until
+        # either every mode/target is confirmed or the caller restores auto mode.
+        deadline = time.monotonic() + 1.2
+        while True:
+            mask = 0 if self.mode_keys else int(self.smc.read("FS! "))
+            observed = [(int(self.smc.read(f"F{i}Md")) if self.mode_keys else int(bool(mask & (1 << i))),
+                         self.smc.read(f"F{i}Tg")) for i in range(self.count)]
+            mismatches = [(i, mode, readback, target)
+                          for i, ((mode, readback), target) in enumerate(zip(observed, targets))
+                          if mode != 1 or abs(readback - target) > 150]
+            if not mismatches:
+                break
+            if time.monotonic() >= deadline:
+                details = "；".join(f"风扇{i + 1}：目标{target:.0f}→回读{readback:.0f} RPM，模式{mode}（{'系统' if mode == 0 else '手动' if mode == 1 else '未知'}）"
+                                   for i, mode, readback, target in mismatches)
+                raise FanError("SMC 未确认写入，自动调速已停止。" + details)
+            time.sleep(0.1)
 
     def restore(self) -> None:
         if not self.owns_fans:
@@ -718,7 +733,7 @@ class HelperClient:
             self.process.stdin.flush()
         except (BrokenPipeError, OSError) as error:
             raise FanError("控制服务已断开；失联后会尝试恢复系统控制。") from error
-        return self.read_response()
+        return self.read_response(timeout=4 if command == "enable" else 2)
 
     def close(self) -> str | None:
         warning = None
@@ -764,6 +779,18 @@ def _clip(text: str, width: int) -> str:
     return "".join(result)
 
 
+def _wrap(text: str, width: int, limit: int = 2) -> list[str]:
+    lines: list[str] = []
+    remaining = text
+    while remaining and len(lines) < limit:
+        line = _clip(remaining, width)
+        lines.append(line)
+        remaining = remaining[len(line):]
+    if remaining and lines:
+        lines[-1] = _clip(lines[-1], max(0, width - 1)) + "…"
+    return lines
+
+
 class TerminalUI:
     def __init__(self, demo: bool) -> None:
         self.demo = demo
@@ -778,6 +805,10 @@ class TerminalUI:
         self.emergency = False
         self.message = "正在读取硬件…"
         self.error = False
+        self.owns_fans = False
+        self.enable_error: str | None = None
+        self.notice: str | None = None
+        self.notice_error = False
         self.edit: Config | None = None
         self.edit_field = 0
         self.help = False
@@ -787,9 +818,14 @@ class TerminalUI:
 
     def accept(self, response: dict) -> None:
         self.active = bool(response.get("active"))
+        self.owns_fans = bool(response.get("owns_fans"))
         self.emergency = bool(response.get("emergency"))
         self.error = not bool(response.get("ok", True))
         self.message = str(response.get("message", ""))
+        if self.active:
+            self.enable_error = None
+        elif self.error:
+            self.enable_error = self.message
         self.sample = Sample.from_dict(response["sample"]) if response.get("sample") else None
         self.smoothed = response.get("smoothed")
         if self.smoothed is None and self.sample:
@@ -819,6 +855,7 @@ class TerminalUI:
         except (FanError, OSError, ValueError) as error:
             self.message = str(error)
             self.error = True
+            self.enable_error = self.message
             self.sample = None
             self.smoothed = None
             self.active = False
@@ -826,6 +863,8 @@ class TerminalUI:
                 # Close stdin so the helper restores immediately; never kill it.
                 self.exit_warning = self.client.close()
                 self.client = None
+                if self.exit_warning is None:
+                    self.owns_fans = False
             elif self.hardware:
                 self.hardware.close()
                 self.hardware = None
@@ -835,13 +874,18 @@ class TerminalUI:
         if not self.sample:
             self.message = "没有有效温度数据，不能开启自动调速。"
             self.error = True
+            self.enable_error = self.message
             return
+        requested = False
         try:
             self.config.validate()
             if self.demo:
                 if not self.demo_session:
                     self.demo_session = Session(self.hardware, time.monotonic())
                 self.accept(self.demo_session.handle({"command": "enable", "config": dataclasses.asdict(self.config)}, time.monotonic()))
+                if self.active:
+                    self.notice = None
+                    self.notice_error = False
                 return
             if not self.client:
                 if any(f.mode != 0 for f in self.sample.fans):
@@ -858,10 +902,25 @@ class TerminalUI:
                     curses.reset_prog_mode()
                     screen.clear()
                     screen.refresh()
+            requested = True
             self.accept(self.client.request("enable", self.config))
+            if self.active:
+                self.notice = None
+                self.notice_error = False
         except (FanError, OSError, ValueError) as error:
             self.message = str(error)
             self.error = True
+            if requested and self.client:
+                self.exit_warning = self.client.close()
+                self.client = None
+                self.active = False
+                if self.exit_warning is None:
+                    self.owns_fans = False
+            if self.active:
+                self.notice = "无法应用设置：" + self.message
+                self.notice_error = True
+            else:
+                self.enable_error = self.message
 
     def disable(self) -> None:
         try:
@@ -869,11 +928,42 @@ class TerminalUI:
                 self.accept(self.client.request("disable"))
             elif self.demo_session:
                 self.accept(self.demo_session.handle({"command": "disable"}, time.monotonic()))
+            elif not self.owns_fans:
+                self.error = False
             self.controller.reset()
             self.smoothed = self.sample.average if self.sample else None
+            if not self.owns_fans and not self.error:
+                self.enable_error = None
+                self.notice = "已恢复系统控制；已保存的曲线仅供预览。"
+                self.notice_error = False
         except (FanError, OSError, ValueError) as error:
             self.message = str(error)
             self.error = True
+            if self.client:
+                self.exit_warning = self.client.close()
+                self.client = None
+                self.active = False
+                if self.exit_warning is None:
+                    self.owns_fans = False
+            self.enable_error = self.message
+
+    def status_banner(self) -> tuple[str, str, str, str]:
+        if self.owns_fans and not self.active:
+            return ("恢复系统控制中 · 曲线未生效", "[s] 请求恢复系统控制", self.enable_error or self.message, "error")
+        if self.notice_error and self.active:
+            return ("设置未保存 · 当前曲线仍生效", "[c] 修改设置    [s] 恢复系统控制", self.notice or self.message, "error")
+        if self.active:
+            return ("自动调速已开启 · 曲线正在生效", "[s] 恢复系统控制", self.message, "active")
+        if self.enable_error:
+            return ("启用失败 · 曲线未生效", "[a] 重试自动调速    [s] 恢复系统控制", self.enable_error, "error")
+        if self.notice_error:
+            return ("设置未保存 · 曲线未生效", "[c] 修改设置", self.notice or self.message, "error")
+        if self.sample is None:
+            return ("读取中或读取失败 · 曲线未生效", "[a] 开启自动调速（读取成功后可用）", self.message, "inactive")
+        if any(f.mode != 0 for f in self.sample.fans):
+            return ("其他程序正在控制风扇 · 曲线未生效", "请先退出其他风扇调速程序", self.message, "error")
+        action = "[a] 开启模拟自动调速（无需授权）" if self.demo else "[a] 授权并开启自动调速"
+        return ("系统控制 · 曲线未生效", action, self.notice or "当前只监测；下方曲线和转速仅供预览。", "inactive")
 
     def text(self, screen: Any, row: int, col: int, text: str, style: int = 0) -> None:
         height, width = screen.getmaxyx()
@@ -890,65 +980,80 @@ class TerminalUI:
         good = curses.color_pair(2)
         warning = curses.color_pair(3)
         dim = curses.A_DIM
-        compact = height < 30
-        shift = 1 if compact else 0
-        graph_row = 12 if compact else 14
-        self.text(screen, 1 - shift, 2, "FanCurve  /  CPU 温度与风扇", accent)
-        self.text(screen, 2 - shift, 2, "演示模式：所有数据与调速均为模拟" if self.demo else "Intel Mac · 无需编译 · 默认只监测", dim)
+        self.text(screen, 0, 2, "FanCurve  /  CPU 温度与风扇", accent)
+        self.text(screen, 1, 2, "演示模式：所有数据与调速均为模拟" if self.demo else "Intel Mac · 无需编译 · 默认只监测", dim)
+        title, action, detail, tone = self.status_banner()
+        status_style = good if tone == "active" else warning if tone == "error" else dim
+        self.text(screen, 2, 2, title, status_style | curses.A_BOLD)
+        self.text(screen, 3, 2, action, accent)
+        for offset, line in enumerate(_wrap("原因：" + detail if tone == "error" else detail, width - 4)):
+            self.text(screen, 4 + offset, 2, line, warning if tone == "error" else dim)
         if height < 24 or width < 78:
-            self.text(screen, 5, 2, "请将终端调整至至少 78 列 × 24 行。")
-            self.text(screen, 7, 2, self.message, warning if self.error else good)
-            self.text(screen, height - 2, 2, "[s] 系统控制   [q] 退出")
+            self.text(screen, 7, 2, "请将终端调整至至少 78 列 × 24 行。")
+            self.text(screen, height - 2, 2, "[a] 自动调速   [s] 系统控制   [q] 退出", accent)
             screen.refresh()
             return
         if self.help:
             lines = ["快捷键", "a  开启按温度自动调速（演示模式无需授权）", "s  恢复系统风扇控制", "c  修改温度与平滑时间", "设置中：↑↓ 选择，←→ 修改，Enter 保存，Esc 取消", "q  退出并请求恢复系统控制", "? / Esc  返回主界面", "", "平均温度 = 有效 CPU 核心读数的算术平均，再作滚动平均。",
-                     "最低转速为硬件报告的下限；满速为各风扇硬件上限。", "CPU/GPU 已知热点 ≥90°C 优先满速，低于85°C退出保护。", "退出、休眠、读数异常、失联12秒会尝试恢复系统控制。", "不要与其他风扇调速软件同时控制同一台 Mac。"]
+                     "0% 为风扇硬件最低转速；100% 为硬件最高转速。", "CPU/GPU 已知热点 ≥90°C 优先满速，低于85°C退出保护。", "退出、休眠、读数异常、失联12秒会尝试恢复系统控制。", "不要与其他风扇调速软件同时控制同一台 Mac。"]
             for i, line in enumerate(lines):
-                self.text(screen, 5 + i, 2, line, accent if i == 0 else 0)
+                self.text(screen, 7 + i, 2, line, accent if i == 0 else 0)
         else:
             temperature = f"{self.smoothed:.1f}°C" if self.smoothed is not None else "—°C"
-            self.text(screen, 4 - shift, 2, temperature, accent)
-            self.text(screen, 4 - shift, 20, f"CPU 平均温度   /   {self.config.window:g} 秒平滑")
-            self.text(screen, 5 - shift, 2, "模式：" + ("自动调速" if self.active else "系统 / 仅监测"), good if self.active else dim)
+            self.text(screen, 6, 2, temperature, accent)
+            self.text(screen, 6, 20, f"CPU 平均温度   /   {self.config.window:g} 秒平滑")
             if self.sample:
-                self.text(screen, 5 - shift, 28, f"当前均温 {self.sample.average:.1f}°C     热点 {self.sample.hottest:.1f}°C")
-                self.text(screen, 6 - shift, 2, self.sample.source, dim)
-            self.text(screen, 8 - shift, 2, "风扇         实际 RPM       目标 RPM       硬件范围          控制模式", accent)
+                self.text(screen, 7, 2, f"当前均温 {self.sample.average:.1f}°C     热点 {self.sample.hottest:.1f}°C")
+                self.text(screen, 8, 2, self.sample.source, dim)
+            for col, label in ((2, "风扇"), (12, "实际RPM"), (24, "当前目标"), (36, "曲线预计"),
+                               (48, "硬件范围"), (65, "控制")):
+                self.text(screen, 9, col, label, accent)
             if self.sample:
                 for i, fan in enumerate(self.sample.fans):
+                    row = 10 + i
                     mode = "FanCurve" if self.active else ("系统" if fan.mode == 0 else "其他程序")
-                    self.text(screen, 9 + i - shift, 2, f"风扇 {fan.id + 1}        {fan.actual:6.0f}         {fan.target:6.0f}         {fan.minimum:.0f}–{fan.maximum:.0f}          {mode}")
+                    expected = fan.minimum + (fan.maximum - fan.minimum) * self.config.fraction(self.smoothed) if self.smoothed is not None else None
+                    for col, value in ((2, f"风扇 {fan.id + 1}"), (12, f"{fan.actual:.0f}"),
+                                       (24, f"{fan.target:.0f}"),
+                                       (36, f"{expected:.0f}" if expected is not None else "—"),
+                                       (48, f"{fan.minimum:.0f}–{fan.maximum:.0f}"), (65, mode)):
+                        self.text(screen, row, col, value, 0 if col != 36 or self.active else dim)
             else:
-                self.text(screen, 9 - shift, 2, "暂无硬件数据", dim)
-            self.text(screen, 12 - shift, 2, "温度曲线  /  按每个风扇的最低与最高转速映射", accent)
+                self.text(screen, 10, 2, "暂无硬件数据", dim)
+            extra_fans = max(0, len(self.sample.fans) - 2) if self.sample else 0
+            graph_top = 14 + extra_fans
             graph_width = min(width - 16, 70)
-            for y in range(5):
-                self.text(screen, graph_row + y, 2, f"{100-y*25:3d}%", dim)
-                self.text(screen, graph_row + y, 8, "·" * graph_width, dim)
-            for x in range(graph_width):
-                t = 30 + x / (graph_width - 1) * 70
-                y = 4 - round(self.config.fraction(t) * 4)
-                self.text(screen, graph_row + y, 8 + x, "━", accent)
-            if self.smoothed is not None:
-                x = round(max(0, min(1, (self.smoothed - 30) / 70)) * (graph_width - 1))
-                y = 4 - round(self.config.fraction(self.smoothed) * 4)
-                self.text(screen, graph_row + y, 8 + x, "●", good | curses.A_BOLD)
-            self.text(screen, graph_row + 5, 8, "30°C" + " " * max(0, graph_width - 10) + "100°C", dim)
-            self.text(screen, 18 if compact else 21, 2, f"开始加速 {self.config.start:g}°C  →  满速 {self.config.full:g}°C     [c] 修改曲线")
-            if self.history and not compact:
-                symbols = "▁▂▃▄▅▆▇█"
-                chart = "".join(symbols[round(max(0, min(1, (v - 30) / 70)) * 7)] for v in self.history)
-                self.text(screen, 23, 2, "最近温度  " + chart, accent)
+            if graph_top + 9 < height:
+                self.text(screen, graph_top - 1, 2, "温度曲线已生效" if self.active else "温度曲线预览 · 当前未生效", accent if self.active else dim)
+                for y in range(5):
+                    self.text(screen, graph_top + y, 2, f"{100-y*25:3d}%", dim)
+                    self.text(screen, graph_top + y, 8, "·" * graph_width, dim)
+                for x in range(graph_width):
+                    t = 30 + x / (graph_width - 1) * 70
+                    y = 4 - round(self.config.fraction(t) * 4)
+                    self.text(screen, graph_top + y, 8 + x, "━", accent if self.active else dim)
+                if self.smoothed is not None:
+                    x = round(max(0, min(1, (self.smoothed - 30) / 70)) * (graph_width - 1))
+                    y = 4 - round(self.config.fraction(self.smoothed) * 4)
+                    self.text(screen, graph_top + y, 8 + x, "●" if self.active else "○", good | curses.A_BOLD if self.active else dim)
+                self.text(screen, graph_top + 5, 8, "30°C" + " " * max(0, graph_width - 10) + "100°C", dim)
+                self.text(screen, graph_top + 6, 2, f"开始加速 {self.config.start:g}°C  →  满速 {self.config.full:g}°C     [c] 修改曲线")
+                if self.history:
+                    symbols = "▁▂▃▄▅▆▇█"
+                    chart = "".join(symbols[round(max(0, min(1, (v - 30) / 70)) * 7)] for v in self.history)
+                    self.text(screen, graph_top + 7, 2, "最近温度  " + chart, accent if self.active else dim)
+            else:
+                self.text(screen, 19, 2, "风扇较多，请增大终端高度查看温度曲线。", dim)
             if self.edit:
-                self.text(screen, 12 - shift, 2, "设置  /  ↑↓ 选择 · ←→ 调整 · Enter 保存 · Esc 取消", accent)
+                self.text(screen, graph_top - 1, 2, "设置  /  ↑↓ 选择 · ←→ 调整 · Enter 保存 · Esc 取消", accent)
                 for i, (label, value, unit) in enumerate([( "开始加速", self.edit.start, "°C"),
                                                           ("达到满速", self.edit.full, "°C"),
                                                           ("平滑时间", self.edit.window, "秒")]):
-                    self.text(screen, graph_row + i, 8, ("> " if i == self.edit_field else "  ") + f"{label}：{value:g} {unit}" + " " * (graph_width - 18), accent if i == self.edit_field else 0)
-        self.text(screen, height - 5, 2, _clip(self.message, width - 5), warning if self.error or self.emergency else good)
-        self.text(screen, height - 3, 2, "[a] 自动调速    [s] 系统控制    [c] 设置    [?] 帮助    [q] 退出", accent)
-        self.text(screen, height - 2, 2, "退出与休眠时恢复系统控制；自动调速需管理员授权。", dim)
+                    self.text(screen, graph_top + i, 8, ("> " if i == self.edit_field else "  ") + f"{label}：{value:g} {unit}" + " " * (graph_width - 18), accent if i == self.edit_field else 0)
+        footer = max(22, 22 + (max(0, len(self.sample.fans) - 2) if self.sample and height >= 24 + len(self.sample.fans) - 2 else 0))
+        footer = min(footer, height - 2)
+        self.text(screen, footer, 2, "[a] 自动调速    [s] 系统控制    [c] 设置    [?] 帮助    [q] 退出", accent)
+        self.text(screen, footer + 1, 2, "0%=硬件最低转速；退出与休眠时恢复系统控制。", dim)
         screen.refresh()
 
     def edit_key(self, key: int) -> None:
@@ -964,23 +1069,40 @@ class TerminalUI:
             value = getattr(self.edit, field) + (step if key == curses.KEY_RIGHT else -step)
             self.edit = dataclasses.replace(self.edit, **{field: value})
         elif key in (10, 13, curses.KEY_ENTER):
+            saved = False
             try:
                 self.edit.validate()
                 save_config(self.edit)
+                saved = True
                 self.config = self.edit
                 self.edit = None
                 self.controller.reset()
+                self.notice = None
+                self.notice_error = False
                 if self.active:
                     if self.client:
                         self.accept(self.client.request("enable", self.config))
                     elif self.demo_session:
                         self.accept(self.demo_session.handle({"command": "enable", "config": dataclasses.asdict(self.config)}, time.monotonic()))
                 else:
-                    self.message = "曲线已保存。"
+                    self.message = "曲线已保存；当前仍由系统控制风扇。"
                     self.error = False
+                    self.notice = "曲线已保存，但尚未生效。按 [a] 授权并开启自动调速。"
+                    self.notice_error = False
             except (FanError, OSError) as error:
                 self.message = str(error)
                 self.error = True
+                if saved:
+                    if self.client:
+                        self.exit_warning = self.client.close()
+                        self.client = None
+                        self.active = False
+                        if self.exit_warning is None:
+                            self.owns_fans = False
+                    self.enable_error = self.message
+                else:
+                    self.notice = "设置错误：" + self.message
+                    self.notice_error = True
 
     def run(self, screen: Any) -> None:
         curses.curs_set(0)
