@@ -231,6 +231,65 @@ class SessionTests(unittest.TestCase):
 
 
 class TerminalUITests(unittest.TestCase):
+    def test_large_temperature_renders_value_and_missing_placeholder(self):
+        self.assertEqual(
+            fc.large_temperature(69.5),
+            (
+                "████ ████    ████",
+                "█    █  █    █   ",
+                "████ ████    ████",
+                "█  █    █ ██    █",
+                "████ ████ ██ ████",
+            ),
+        )
+        placeholder = fc.large_temperature(None)
+        self.assertEqual(len(placeholder), 5)
+        self.assertEqual(placeholder, fc.large_temperature(math.nan))
+        self.assertEqual(placeholder[2], "████ ████    ████")
+
+    def test_78_by_24_layout_keeps_right_status_separate_from_fan_table(self):
+        class FakeScreen:
+            def __init__(self):
+                self.cells = []
+
+            def getmaxyx(self):
+                return 24, 78
+
+            def erase(self):
+                pass
+
+            def addstr(self, row, col, text, style=0):
+                self.cells.append((row, col, text))
+
+            def refresh(self):
+                pass
+
+        ui = fc.TerminalUI(demo=True)
+        ui.sample = sample(cpu=69.5)
+        ui.smoothed = 69.5
+        screen = FakeScreen()
+        with patch("fan_curve.curses.color_pair", return_value=0):
+            ui.draw(screen)
+        self.assertTrue(any(row == 1 and col == 2 for row, col, _ in screen.cells))
+        self.assertTrue(any(row == 1 and col == 32 for row, col, _ in screen.cells))
+        self.assertTrue(any(row == 9 and "当前目标" in text for row, _, text in screen.cells))
+        self.assertTrue(any(row == 10 and "风扇 1" in text for row, _, text in screen.cells))
+        self.assertFalse(any("至少 78 列" in text for _, _, text in screen.cells))
+
+    def test_wrap_keeps_two_fan_write_diagnostics_in_three_lines(self):
+        diagnostic = (
+            "原因：SMC 未确认写入，自动调速已停止。"
+            "风扇1：目标3240→回读1800RPM，模式1（手动）；"
+            "风扇2：目标3000→回读2200RPM，模式1（手动）"
+        )
+        lines = fc._wrap(diagnostic, 44, 3)
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[0].endswith("。"))
+        self.assertTrue(lines[1].endswith("；"))
+        self.assertIn("风扇2：目标3000→回读2200RPM", lines[2])
+        self.assertFalse(any(line.endswith("…") for line in lines))
+        self.assertEqual("".join(lines), diagnostic)
+
     def test_monitor_read_failure_is_not_reported_as_enable_failure(self):
         class BrokenHardware:
             owns_fans = False

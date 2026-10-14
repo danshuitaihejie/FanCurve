@@ -369,7 +369,7 @@ class Hardware:
             if not mismatches:
                 break
             if time.monotonic() >= deadline:
-                details = "；".join(f"风扇{i + 1}：目标{target:.0f}→回读{readback:.0f} RPM，模式{mode}（{'系统' if mode == 0 else '手动' if mode == 1 else '未知'}）"
+                details = "；".join(f"风扇{i + 1}：目标{target:.0f}→回读{readback:.0f}RPM，模式{mode}（{'系统' if mode == 0 else '手动' if mode == 1 else '未知'}）"
                                    for i, mode, readback, target in mismatches)
                 raise FanError("SMC 未确认写入，自动调速已停止。" + details)
             time.sleep(0.1)
@@ -784,11 +784,36 @@ def _wrap(text: str, width: int, limit: int = 2) -> list[str]:
     remaining = text
     while remaining and len(lines) < limit:
         line = _clip(remaining, width)
+        if len(line) < len(remaining):
+            separator = max(line.rfind("。"), line.rfind("；"))
+            if separator >= max(6, len(line) // 2):
+                line = line[:separator + 1]
         lines.append(line)
         remaining = remaining[len(line):]
     if remaining and lines:
         lines[-1] = _clip(lines[-1], max(0, width - 1)) + "…"
     return lines
+
+
+_LARGE_DIGITS = {
+    "0": ("████", "█  █", "█  █", "█  █", "████"),
+    "1": ("  █ ", " ██ ", "  █ ", "  █ ", "████"),
+    "2": ("████", "   █", "████", "█   ", "████"),
+    "3": ("████", "   █", " ███", "   █", "████"),
+    "4": ("█  █", "█  █", "████", "   █", "   █"),
+    "5": ("████", "█   ", "████", "   █", "████"),
+    "6": ("████", "█   ", "████", "█  █", "████"),
+    "7": ("████", "   █", "  █ ", " █  ", " █  "),
+    "8": ("████", "█  █", "████", "█  █", "████"),
+    "9": ("████", "█  █", "████", "   █", "████"),
+    ".": ("  ", "  ", "  ", "██", "██"),
+    "–": ("    ", "    ", "████", "    ", "    "),
+}
+
+
+def large_temperature(value: float | None) -> tuple[str, ...]:
+    display = f"{value:.1f}" if value is not None and math.isfinite(value) else "––.–"
+    return tuple(" ".join(_LARGE_DIGITS[char][row] for char in display) for row in range(5))
 
 
 class TerminalUI:
@@ -985,13 +1010,16 @@ class TerminalUI:
         warning = curses.color_pair(3)
         dim = curses.A_DIM
         self.text(screen, 0, 2, "FanCurve  /  CPU 温度与风扇", accent)
-        self.text(screen, 1, 2, "演示模式：所有数据与调速均为模拟" if self.demo else "Intel Mac · 无需编译 · 默认只监测", dim)
+        for row, line in enumerate(large_temperature(self.smoothed), 1):
+            self.text(screen, row, 2, line, accent if self.smoothed is not None else dim)
+        self.text(screen, 5, 28, "°C", accent if self.smoothed is not None else dim)
         title, action, detail, tone = self.status_banner()
         status_style = good if tone == "active" else warning if tone == "error" else dim
-        self.text(screen, 2, 2, title, status_style | curses.A_BOLD)
-        self.text(screen, 3, 2, action, accent)
-        for offset, line in enumerate(_wrap("原因：" + detail if tone == "error" else detail, width - 4)):
-            self.text(screen, 4 + offset, 2, line, warning if tone == "error" else dim)
+        self.text(screen, 1, 32, title, status_style | curses.A_BOLD)
+        self.text(screen, 2, 32, action, accent)
+        for offset, line in enumerate(_wrap("原因：" + detail if tone == "error" else detail,
+                                            max(1, width - 34), limit=3)):
+            self.text(screen, 3 + offset, 32, line, warning if tone == "error" else dim)
         if height < 24 or width < 78:
             self.text(screen, 7, 2, "请将终端调整至至少 78 列 × 24 行。")
             self.text(screen, height - 2, 2, "[a] 自动调速   [s] 系统控制   [q] 退出", accent)
@@ -1003,12 +1031,11 @@ class TerminalUI:
             for i, line in enumerate(lines):
                 self.text(screen, 7 + i, 2, line, accent if i == 0 else 0)
         else:
-            temperature = f"{self.smoothed:.1f}°C" if self.smoothed is not None else "—°C"
-            self.text(screen, 6, 2, temperature, accent)
-            self.text(screen, 6, 20, f"CPU 平均温度   /   {self.config.window:g} 秒平滑")
+            self.text(screen, 6, 2, f"CPU 平均温度 · {self.config.window:g} 秒平滑", dim)
             if self.sample:
-                self.text(screen, 7, 2, f"当前均温 {self.sample.average:.1f}°C     热点 {self.sample.hottest:.1f}°C")
+                self.text(screen, 6, 34, f"当前均温 {self.sample.average:.1f}°C · 热点 {self.sample.hottest:.1f}°C")
                 self.text(screen, 8, 2, self.sample.source, dim)
+            self.text(screen, 7, 2, "演示模式 · 模拟数据" if self.demo else "Intel Mac · 无需编译 · 默认只监测", dim)
             for col, label in ((2, "风扇"), (12, "实际RPM"), (24, "当前目标"), (36, "曲线预计"),
                                (48, "硬件范围"), (65, "控制")):
                 self.text(screen, 9, col, label, accent)
