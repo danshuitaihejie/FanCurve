@@ -1,7 +1,12 @@
 import math
 import itertools
+import os
+import plistlib
 import struct
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import fan_curve as fc
@@ -15,6 +20,172 @@ def sample(cpu=50.0, hottest=None, fans=None, sensors=None):
         fc.Fan(1, 1500, 2500, 1700, 1700),
     ]
     return fc.Sample(sensors, "fake", hottest, fans)
+
+
+class LoginAgentTests(unittest.TestCase):
+    def test_install_generates_login_agent_and_executable_launcher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            script = home / "source folder" / "fan_curve.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("# test script\n", encoding="utf-8")
+            fc.install_login_agent(script_path=script, home=home, uv_path="/opt/homebrew/bin/uv")
+
+            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            plist_path = home / "Library/LaunchAgents/com.fancurve.login.plist"
+            self.assertTrue(launcher.is_file())
+            self.assertTrue(os.access(launcher, os.X_OK))
+            launcher_text = launcher.read_text(encoding="utf-8")
+            self.assertIn(str(script), launcher_text)
+            self.assertIn("/opt/homebrew/bin/uv", launcher_text)
+            self.assertIn("uv run --no-project", launcher_text)
+            self.assertIn("--start-hidden", launcher_text)
+
+            with plist_path.open("rb") as stream:
+                agent = plistlib.load(stream)
+            self.assertEqual(agent["Label"], "com.fancurve.login")
+            self.assertTrue(agent["RunAtLoad"])
+            self.assertEqual(agent["LimitLoadToSessionType"], "Aqua")
+            self.assertEqual(agent["ProgramArguments"], [
+                "/usr/bin/open", "-g", "-a", "Terminal", str(launcher.resolve()),
+            ])
+
+    def test_reinstall_updates_launcher_script_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            first_script = home / "first" / "fan_curve.py"
+            second_script = home / "second" / "fan_curve.py"
+            for script in (first_script, second_script):
+                script.parent.mkdir(parents=True)
+                script.write_text("# test script\n", encoding="utf-8")
+            fc.install_login_agent(script_path=first_script, home=home, uv_path="/tools/uv")
+            fc.install_login_agent(script_path=second_script, home=home, uv_path="/tools/uv")
+
+            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            self.assertIn(str(second_script), launcher.read_text(encoding="utf-8"))
+            self.assertNotIn(str(first_script), launcher.read_text(encoding="utf-8"))
+
+    def test_uninstall_removes_only_owned_files_and_preserves_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            script = home / "source" / "fan_curve.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("# test script\n", encoding="utf-8")
+            fc.install_login_agent(script_path=script, home=home, uv_path="/tools/uv")
+            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            plist_path = home / "Library/LaunchAgents/com.fancurve.login.plist"
+            config = script.with_name(".fancurve.json")
+            config.parent.mkdir(parents=True, exist_ok=True)
+            config.write_text('{"start": 51, "full": 81, "window": 7}\n', encoding="utf-8")
+            unrelated = launcher.parent / "notes.txt"
+            unrelated.write_text("keep\n", encoding="utf-8")
+            other_agent = plist_path.parent / "com.example.other.plist"
+            other_agent.write_text("keep\n", encoding="utf-8")
+
+            fc.uninstall_login_agent(home=home)
+
+            self.assertFalse(launcher.exists())
+            self.assertFalse(plist_path.exists())
+            self.assertTrue(config.exists())
+            self.assertTrue(script.parent.exists())
+            self.assertTrue(unrelated.exists())
+            self.assertTrue(other_agent.exists())
+
+
+class ProtectedInstallTests(unittest.TestCase):
+    def _temporary_protected_paths(self, directory):
+        root = Path(directory)
+        system_tools = root / "Library/PrivilegedHelperTools"
+        system_tools.mkdir(parents=True)
+        sudoers_dir = root / "private/etc/sudoers.d"
+        sudoers_dir.mkdir(parents=True)
+        helper_dir = system_tools / "FanCurve"
+        root_script = helper_dir / "fan_curve.py"
+        root_launcher = system_tools / "com.fancurve.helper"
+        sudoers_file = sudoers_dir / "fancurve"
+        return (patch.multiple(fc, ROOT_HELPER_DIR=helper_dir, ROOT_SCRIPT=root_script,
+                               ROOT_LAUNCHER=root_launcher, SUDOERS_FILE=sudoers_file),
+                helper_dir, root_script, root_launcher, sudoers_file)
+
+    def test_builds_narrow_protected_policy_and_fixed_system_python_launcher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path_patch, helper_dir, root_script, launcher, sudoers = self._temporary_protected_paths(directory)
+            with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
+                 patch.object(fc, "_require_protected_directory"), \
+                 patch.object(fc, "_sudoers_directory_enabled", return_value=True), \
+                 patch.object(fc.subprocess, "run", return_value=type("Result", (), {"returncode": 0,
+                                      "stderr": "", "stdout": ""})()) as run:
+                fc.install_privileged_helper()
+
+            self.assertTrue(helper_dir.is_dir())
+            policy = sudoers.read_text(encoding="ascii")
+            self.assertEqual(policy, f"{fc.SUDOERS_MARKER}\ntest-user ALL=(root) NOPASSWD: {launcher} \"\"\n")
+            self.assertIn("NOPASSWD", policy)
+            self.assertEqual(launcher.read_text(),
+                             "#!/bin/sh\n" + fc.ROOT_LAUNCHER_MARKER + "\n" +
+                             f"exec /usr/bin/python3 -I -u {root_script} --helper\n")
+            self.assertEqual(run.call_count, 2)
+
+    def test_uninstall_removes_only_owned_protected_files_and_preserves_user_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path_patch, helper_dir, root_script, launcher, sudoers = self._temporary_protected_paths(directory)
+            with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
+                 patch.object(fc, "_require_protected_directory"), \
+                 patch.object(fc, "_sudoers_directory_enabled", return_value=True), \
+                 patch.object(fc.subprocess, "run", return_value=type("Result", (), {"returncode": 0,
+                                      "stderr": "", "stdout": ""})()):
+                fc.install_privileged_helper()
+                config = Path(directory) / "user/.fancurve.json"
+                config.parent.mkdir()
+                config.write_text('{"start": 51, "full": 81, "window": 7}\n', encoding="utf-8")
+                unrelated = helper_dir / "keep.txt"
+                unrelated.write_text("keep\n", encoding="utf-8")
+                fc.uninstall_privileged_helper()
+
+            self.assertFalse(root_script.exists())
+            self.assertFalse(launcher.exists())
+            self.assertFalse(sudoers.exists())
+            self.assertTrue(unrelated.exists())
+            self.assertTrue(helper_dir.is_dir())
+            self.assertTrue(config.exists())
+
+    def test_install_does_not_replace_unrecognized_protected_script(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path_patch, helper_dir, root_script, _, _ = self._temporary_protected_paths(directory)
+            helper_dir.mkdir()
+            root_script.write_text("unrelated program\n", encoding="utf-8")
+            with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
+                 patch.object(fc, "_require_protected_directory"), \
+                 patch.object(fc, "_sudoers_directory_enabled", return_value=True):
+                with self.assertRaisesRegex(fc.FanError, "未覆盖"):
+                    fc.install_privileged_helper()
+            self.assertEqual(root_script.read_text(encoding="utf-8"), "unrelated program\n")
+
+    def test_installed_helper_client_invokes_sudo_without_extra_arguments(self):
+        with patch.object(fc.subprocess, "Popen") as popen, \
+             patch.object(fc.HelperClient, "read_response", return_value={"ok": True}):
+            fc.HelperClient(installed=True)
+
+        self.assertEqual(popen.call_args.args[0], ["/usr/bin/sudo", "-n", str(fc.ROOT_LAUNCHER)])
+
+
+class ProtectedSleepResumeTests(unittest.TestCase):
+    def test_sleep_response_resets_auto_enable_latch_only_with_protected_helper(self):
+        response = {"active": False, "owns_fans": False, "ok": True,
+                    "message": "电脑进入休眠，自动调速已停用。"}
+        with patch.object(fc, "protected_helper_available", return_value=True):
+            ui = fc.TerminalUI(demo=False)
+            ui.active = True
+            ui.auto_enable_attempted = True
+            ui.accept(response)
+            self.assertFalse(ui.auto_enable_attempted)
+
+        with patch.object(fc, "protected_helper_available", return_value=False):
+            ui = fc.TerminalUI(demo=False)
+            ui.active = True
+            ui.auto_enable_attempted = True
+            ui.accept(response)
+            self.assertTrue(ui.auto_enable_attempted)
 
 
 class ConfigAndCodecTests(unittest.TestCase):
@@ -231,6 +402,73 @@ class SessionTests(unittest.TestCase):
 
 
 class TerminalUITests(unittest.TestCase):
+    def test_terminal_window_action_targets_only_the_current_tty(self):
+        completed = fc.subprocess.CompletedProcess([], 0, stdout="ok\n", stderr="")
+        with patch.object(fc.os, "ttyname", return_value="/dev/ttys123"), \
+             patch.object(fc.subprocess, "run", return_value=completed) as run:
+            fc.set_terminal_window_visible(False)
+            self.assertEqual(run.call_args.args[0][-2:], ["/dev/ttys123", "hide"])
+            fc.set_terminal_window_visible(True)
+            self.assertEqual(run.call_args.args[0][-2:], ["/dev/ttys123", "show"])
+            run.return_value = fc.subprocess.CompletedProcess([], 0, stdout="missing\n", stderr="")
+            with self.assertRaisesRegex(fc.FanError, "无法定位"):
+                fc.set_terminal_window_visible(False)
+
+    def test_menu_bar_click_signal_is_consumed_once(self):
+        reader, writer = os.pipe()
+        try:
+            os.set_blocking(reader, False)
+            client = object.__new__(fc.MenuBarClient)
+            client.process = SimpleNamespace(stdout=os.fdopen(reader, "rb", buffering=0))
+            client.pending_actions = b""
+            os.write(writer, b"SHOW\n")
+            self.assertTrue(client.show_requested())
+            self.assertFalse(client.show_requested())
+        finally:
+            client.process.stdout.close()
+            os.close(writer)
+
+    def test_menu_bar_temperature_uses_same_smoothed_reading_format(self):
+        self.assertEqual(fc.menu_temperature(69.54), "69.5°C")
+        self.assertEqual(fc.menu_temperature(None), "--.-°C")
+        self.assertEqual(fc.menu_temperature(float("nan")), "--.-°C")
+
+    def test_auto_enable_waits_for_valid_sample_and_attempts_only_once(self):
+        ui = fc.TerminalUI(demo=True)
+        screen = object()
+        with patch.object(ui, "enable") as enable:
+            ui.maybe_auto_enable(screen)
+            self.assertFalse(ui.auto_enable_attempted)
+            enable.assert_not_called()
+
+            ui.sample = sample(cpu=55)
+            ui.maybe_auto_enable(screen)
+            ui.maybe_auto_enable(screen)
+
+        self.assertTrue(ui.auto_enable_attempted)
+        enable.assert_called_once_with(screen)
+
+    def test_monitor_mode_never_auto_enables_but_keeps_manual_enable_available(self):
+        ui = fc.TerminalUI(demo=True, monitor=True)
+        ui.sample = sample(cpu=55)
+        screen = object()
+        with patch.object(ui, "enable") as enable:
+            ui.maybe_auto_enable(screen)
+
+        self.assertFalse(ui.auto_enable_attempted)
+        enable.assert_not_called()
+
+    def test_auto_enable_failure_is_not_retried(self):
+        ui = fc.TerminalUI(demo=True)
+        ui.sample = sample(cpu=55)
+        screen = object()
+        with patch.object(ui, "enable", side_effect=RuntimeError("expected test failure")) as enable:
+            with self.assertRaisesRegex(RuntimeError, "expected test failure"):
+                ui.maybe_auto_enable(screen)
+            ui.maybe_auto_enable(screen)
+
+        enable.assert_called_once_with(screen)
+
     def test_large_temperature_renders_value_and_missing_placeholder(self):
         self.assertEqual(
             fc.large_temperature(69.5),
@@ -270,7 +508,10 @@ class TerminalUITests(unittest.TestCase):
         screen = FakeScreen()
         with patch("fan_curve.curses.color_pair", return_value=0):
             ui.draw(screen)
-        self.assertTrue(any(row == 1 and col == 2 for row, col, _ in screen.cells))
+        expected_digit_rows = fc.large_temperature(69.5)
+        for row, text in enumerate(expected_digit_rows, 1):
+            self.assertIn((row, 2, text), screen.cells)
+        self.assertIn((5, 28, "°C"), screen.cells)
         self.assertTrue(any(row == 1 and col == 32 for row, col, _ in screen.cells))
         self.assertTrue(any(row == 9 and "当前目标" in text for row, _, text in screen.cells))
         self.assertTrue(any(row == 10 and "风扇 1" in text for row, _, text in screen.cells))
