@@ -19,13 +19,13 @@ uv run --no-project fan_curve.py
 
 ## 登录时启动
 
-需要 macOS 自带的 `/usr/bin/python3` 版本不低于 3.9，并且 `/private/etc/sudoers` 已启用 `/private/etc/sudoers.d`（通常是 `#includedir /private/etc/sudoers.d`）。将 `fan_curve.py` 复制到 Intel Mac 上希望长期保存的位置，然后在 Terminal 中运行：
+需要 macOS 自带的 `/usr/bin/python3` 版本不低于 3.9，并且 `/private/etc/sudoers` 已启用 `/private/etc/sudoers.d`（通常是 `#includedir /private/etc/sudoers.d`）。如果首次运行触发 `xcode-select` 安装提示，请先完成 macOS 命令行工具安装，再重新运行；Python 无法启动与版本过旧会分别提示。将 `fan_curve.py` 复制到 Intel Mac 上希望长期保存的位置，然后在 Terminal 中运行：
 
 ```sh
 uv run --no-project fan_curve.py --install
 ```
 
-安装期间需要输入一次管理员密码。`--install` 会把受保护的控制脚本和固定启动器安装到 `/Library/PrivilegedHelperTools`，并在 `/private/etc/sudoers.d/fancurve` 写入仅允许当前用户无密码、无参数启动该固定 helper 的规则；安装过程会用 `visudo` 校验规则。随后会在 `~/Library/Application Support/FanCurve/启动.command` 创建可执行启动器，并在 `~/Library/LaunchAgents/com.fancurve.login.plist` 创建当前用户登录项。登录项会在后台打开 Terminal，读取有效温度、启动菜单栏图标和自动调速后，只最小化 FanCurve 所在的终端窗口。安装本身不会启动调速，也不会保存管理员密码。
+安装期间需要输入一次管理员密码。`--install` 会把受保护的控制脚本和固定启动器安装到 `/Library/PrivilegedHelperTools`，并在 `/private/etc/sudoers.d/fancurve` 写入仅允许当前用户无密码、无参数启动该固定 helper 的规则；如果这些目录尚不存在，安装器会核验其父目录权限后创建，并用 `visudo` 校验规则。随后会在 `~/Library/Application Support/FanCurve/启动.command` 创建可执行启动器，并在 `~/Library/LaunchAgents/com.fancurve.login.plist` 创建当前用户登录项。登录项会在后台打开 Terminal，读取有效温度、启动菜单栏图标和自动调速后，只最小化 FanCurve 所在的终端窗口。安装本身不会启动调速，也不会保存管理员密码。
 
 如果移动了 `fan_curve.py` 或更新了风扇控制服务逻辑，请在新位置重新运行 `uv run --no-project fan_curve.py --install`，以更新受保护副本和登录启动器引用的路径。仅更新终端或菜单栏界面时，替换原脚本并重启程序即可。运行 `uv run --no-project fan_curve.py --uninstall` 可移除受保护 helper、sudoers 规则、登录项和启动器；卸载需要一次管理员授权，并保留原脚本及配置。
 

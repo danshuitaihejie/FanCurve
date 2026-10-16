@@ -2,6 +2,7 @@ import math
 import itertools
 import os
 import plistlib
+import stat
 import struct
 import tempfile
 import unittest
@@ -93,6 +94,12 @@ class LoginAgentTests(unittest.TestCase):
 
 
 class ProtectedInstallTests(unittest.TestCase):
+    @staticmethod
+    def _check_test_directory(path):
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o022:
+            raise fc.FanError(f"系统目录权限不安全，未安装：{path}")
+
     def _temporary_protected_paths(self, directory):
         root = Path(directory)
         system_tools = root / "Library/PrivilegedHelperTools"
@@ -111,7 +118,7 @@ class ProtectedInstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path_patch, helper_dir, root_script, launcher, sudoers = self._temporary_protected_paths(directory)
             with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
-                 patch.object(fc, "_require_protected_directory"), \
+                 patch.object(fc, "_require_protected_directory", side_effect=self._check_test_directory), \
                  patch.object(fc, "_sudoers_directory_enabled", return_value=True), \
                  patch.object(fc.subprocess, "run", return_value=type("Result", (), {"returncode": 0,
                                       "stderr": "", "stdout": ""})()) as run:
@@ -130,7 +137,7 @@ class ProtectedInstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path_patch, helper_dir, root_script, launcher, sudoers = self._temporary_protected_paths(directory)
             with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
-                 patch.object(fc, "_require_protected_directory"), \
+                 patch.object(fc, "_require_protected_directory", side_effect=self._check_test_directory), \
                  patch.object(fc, "_sudoers_directory_enabled", return_value=True), \
                  patch.object(fc.subprocess, "run", return_value=type("Result", (), {"returncode": 0,
                                       "stderr": "", "stdout": ""})()):
@@ -155,11 +162,58 @@ class ProtectedInstallTests(unittest.TestCase):
             helper_dir.mkdir()
             root_script.write_text("unrelated program\n", encoding="utf-8")
             with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
-                 patch.object(fc, "_require_protected_directory"), \
+                 patch.object(fc, "_require_protected_directory", side_effect=self._check_test_directory), \
                  patch.object(fc, "_sudoers_directory_enabled", return_value=True):
                 with self.assertRaisesRegex(fc.FanError, "未覆盖"):
                     fc.install_privileged_helper()
             self.assertEqual(root_script.read_text(encoding="utf-8"), "unrelated program\n")
+
+    def test_install_creates_missing_protected_system_directories(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path_patch, helper_dir, root_script, launcher, sudoers = self._temporary_protected_paths(directory)
+            launcher.parent.rmdir()
+            sudoers.parent.rmdir()
+            with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
+                 patch.object(fc, "_require_protected_directory", side_effect=self._check_test_directory), \
+                 patch.object(fc, "_sudoers_directory_enabled", return_value=True), \
+                 patch.object(fc.subprocess, "run", return_value=SimpleNamespace(returncode=0, stderr="", stdout="")):
+                fc.install_privileged_helper()
+
+            self.assertTrue(root_script.is_file())
+            self.assertTrue(launcher.is_file())
+            self.assertTrue(sudoers.is_file())
+            for path in (launcher.parent, sudoers.parent, helper_dir):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o755)
+
+    def test_install_rejects_missing_directory_under_writable_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path_patch, _, _, launcher, _ = self._temporary_protected_paths(directory)
+            launcher.parent.rmdir()
+            launcher.parent.parent.chmod(0o777)
+            with path_patch, patch.object(fc, "_require_root_installer", return_value="test-user"), \
+                 patch.object(fc, "_require_protected_directory", side_effect=self._check_test_directory), \
+                 patch.object(fc, "_sudoers_directory_enabled", return_value=True):
+                with self.assertRaisesRegex(fc.FanError, "权限不安全"):
+                    fc.install_privileged_helper()
+            self.assertFalse(launcher.parent.exists())
+
+    def test_system_python_unavailable_is_not_reported_as_old_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / "python3"
+            interpreter.touch()
+            with patch.object(fc.subprocess, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="xcode-select: no developer tools")):
+                with self.assertRaisesRegex(fc.FanError, "命令行工具"):
+                    fc._require_system_python(interpreter)
+
+    def test_system_python_version_is_checked_after_successful_launch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            interpreter = Path(directory) / "python3"
+            interpreter.touch()
+            with patch.object(fc.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="3.8\n", stderr="")):
+                with self.assertRaisesRegex(fc.FanError, "版本过旧"):
+                    fc._require_system_python(interpreter)
+            with patch.object(fc.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="3.9\n", stderr="")):
+                fc._require_system_python(interpreter)
 
     def test_installed_helper_client_invokes_sudo_without_extra_arguments(self):
         with patch.object(fc.subprocess, "Popen") as popen, \

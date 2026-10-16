@@ -1555,6 +1555,21 @@ def _require_protected_directory(path: Path) -> None:
         raise FanError(f"系统目录权限不安全，未安装：{path}")
 
 
+def _ensure_protected_directory(path: Path) -> None:
+    try:
+        _require_protected_directory(path)
+        return
+    except FileNotFoundError:
+        # Never create under a user-writable parent or follow a replacement symlink.
+        _require_protected_directory(path.parent)
+    try:
+        path.mkdir(mode=0o755)
+        path.chmod(0o755)
+    except FileExistsError:
+        pass
+    _require_protected_directory(path)
+
+
 def _sudoers_directory_enabled() -> bool:
     source = Path("/private/etc/sudoers").read_text(encoding="utf-8")
     return bool(re.search(r"(?m)^\s*[#@]includedir\s+(?:/private)?/etc/sudoers\.d\s*$", source))
@@ -1577,15 +1592,11 @@ def _require_root_installer() -> str:
 def install_privileged_helper() -> None:
     """Run only under sudo, once per install or upgrade. Never start the helper."""
     username = _require_root_installer()
-    _require_protected_directory(ROOT_LAUNCHER.parent)
-    _require_protected_directory(SUDOERS_FILE.parent)
     if not _sudoers_directory_enabled():
         raise FanError("系统 sudoers 未启用 /private/etc/sudoers.d，未修改系统文件。")
-    if ROOT_HELPER_DIR.exists():
-        _require_protected_directory(ROOT_HELPER_DIR)
-    else:
-        ROOT_HELPER_DIR.mkdir(mode=0o755)
-        ROOT_HELPER_DIR.chmod(0o755)
+    _ensure_protected_directory(ROOT_LAUNCHER.parent)
+    _ensure_protected_directory(SUDOERS_FILE.parent)
+    _ensure_protected_directory(ROOT_HELPER_DIR)
     if ROOT_LAUNCHER.exists() and ROOT_LAUNCHER_MARKER not in ROOT_LAUNCHER.read_text(encoding="utf-8"):
         raise FanError(f"已有同名受保护程序，未覆盖：{ROOT_LAUNCHER}")
     if ROOT_SCRIPT.exists() and b"Intel macOS fan controller" not in ROOT_SCRIPT.read_bytes()[:512]:
@@ -1646,18 +1657,33 @@ def uninstall_privileged_helper() -> None:
         ROOT_HELPER_DIR.rmdir()
 
 
+def _require_system_python(interpreter: Path) -> None:
+    if not interpreter.is_file():
+        raise FanError("找不到系统 Python：/usr/bin/python3。请先安装 macOS 命令行工具。")
+    try:
+        result = subprocess.run([str(interpreter), "-c", "import sys; print(*sys.version_info[:2], sep='.')"],
+                                capture_output=True, text=True, check=False)
+    except OSError as error:
+        raise FanError("系统 Python 无法启动，请先安装 macOS 命令行工具（xcode-select --install）后重试。") from error
+    if result.returncode:
+        raise FanError("系统 Python 无法启动，请先安装 macOS 命令行工具（xcode-select --install）后重试。")
+    try:
+        version = tuple(int(part) for part in result.stdout.strip().split("."))
+    except ValueError as error:
+        raise FanError("无法识别系统 Python 版本，请检查 /usr/bin/python3。") from error
+    if len(version) != 2:
+        raise FanError("无法识别系统 Python 版本，请检查 /usr/bin/python3。")
+    if version < (3, 9):
+        raise FanError("系统 Python 版本过旧，受保护控制服务需要 Python 3.9 或更新版本。")
+
+
 def _run_privileged_installer(mode: str) -> None:
     if platform.system() != "Darwin":
         raise FanError("无人值守调速安装仅支持 macOS。")
     if not sys.stdin.isatty():
         raise FanError("一次性管理员安装需要终端，请在 Terminal 中运行此命令。")
     interpreter = Path("/usr/bin/python3")
-    if not interpreter.is_file():
-        raise FanError("找不到系统 Python：/usr/bin/python3。请先安装 macOS 命令行工具。")
-    version = subprocess.run([str(interpreter), "-c", "import sys; assert sys.version_info >= (3, 9)"],
-                             check=False)
-    if version.returncode:
-        raise FanError("系统 Python 版本过旧，受保护控制服务需要 Python 3.9 或更新版本。")
+    _require_system_python(interpreter)
     print("\nFanCurve 需要一次管理员授权，以安装仅允许启动受保护控制服务的规则。\n", flush=True)
     if subprocess.run(["/usr/bin/sudo", "-v"], check=False).returncode:
         raise FanError("管理员授权取消或失败，未完成安装。")
