@@ -52,6 +52,231 @@ class FanError(Exception):
     pass
 
 
+LANGUAGE = "zh"
+
+# Keep translations in this file so a single copied script still runs on another Mac.
+EN_TEXT = {
+    "配置必须是有限数值。": "Settings must be finite numbers.",
+    "起点 35–70°C，满速 55–90°C，至少相差 10°C，平滑 2–20 秒。": "Start: 35–70°C; full speed: 55–90°C; gap: at least 10°C; smoothing: 2–20 seconds.",
+    "配置格式不正确。": "Invalid settings format.",
+    "没有有效的 CPU 温度或风扇数据。": "No valid CPU temperature or fan data.",
+    "温度读取异常，自动调速已停止。": "Temperature reading failed; automatic fan control stopped.",
+    "风扇数据超出有效范围，自动调速已停止。": "Fan data is out of range; automatic fan control stopped.",
+    "SMC 数据长度不正确。": "Invalid SMC data length.",
+    "SMC 返回非有限数值。": "SMC returned a non-finite value.",
+    "SMC 写入数值不正确。": "Invalid SMC write value.",
+    "此版本只支持 Intel Mac 的 macOS。": "This version supports Intel Macs running macOS only.",
+    "AppleSMC 接口结构大小不正确。": "Unexpected AppleSMC interface size.",
+    "系统没有 AppleSMC 设备。": "No AppleSMC device was found.",
+    "SMC 返回了不同的接口结构。": "SMC returned an unexpected interface structure.",
+    "SMC 键名必须为 4 字节。": "SMC keys must be four bytes long.",
+    "写入风扇需要管理员授权。": "Changing fan speed requires administrator authorization.",
+    "此程序只允许写入风扇目标与模式。": "This program may only write fan targets and modes.",
+    "SMC 写入长度不一致。": "SMC write length mismatch.",
+    "没有可控制的风扇。": "No controllable fans were found.",
+    "找不到有效的 CPU 温度传感器。": "No valid CPU temperature sensor was found.",
+    "其他程序已接管风扇。请先将 Macs Fan Control 恢复自动模式并退出。": "Another app controls the fans. Restore automatic mode in Macs Fan Control and quit it first.",
+    "风扇数量不一致。": "Fan count changed unexpectedly.",
+    "目标转速超出硬件范围。": "Target RPM is outside the hardware range.",
+    "SMC 未确认系统自动模式": "SMC did not confirm system automatic mode",
+    "未知": "Unknown",
+    "手动": "Manual",
+    "系统自动控制": "System control",
+    "请求格式无效。": "Invalid request format.",
+    "控制服务正在退出，请重新开启。": "The control service is exiting; start it again.",
+    "正在重试恢复系统控制，暂不能重新开启。": "Still trying to restore system control; cannot restart yet.",
+    "不支持的控制命令。": "Unsupported control command.",
+    "终端失联，已请求恢复系统控制。": "Terminal disconnected; requested restoration of system control.",
+    "热点保护：优先满速": "Hotspot protection: full speed takes priority",
+    "正在按 CPU 平均温度调速": "Adjusting fans from average CPU temperature",
+    "无法订阅休眠通知，自动调速未开启。": "Could not monitor sleep; automatic fan control was not started.",
+    "控制服务必须由终端界面的管理员授权流程启动。": "The control service must be started through the Terminal authorization flow.",
+    "另一个 FanCurve 控制服务正在运行。请先在原终端恢复系统控制并退出。": "Another FanCurve control service is running. Restore system control and quit it in the original Terminal window first.",
+    "电脑进入休眠，自动模式已停用。": "Mac is sleeping; automatic fan control stopped.",
+    "终端已关闭。": "Terminal closed.",
+    "收到退出信号。": "Exit signal received.",
+    "终端已关闭，恢复系统控制。": "Terminal closed; restoring system control.",
+    "控制请求过长。": "Control request is too long.",
+    "控制请求格式无效。": "Invalid control request format.",
+    "控制服务退出，恢复系统控制。": "Control service exited; restoring system control.",
+    "控制服务初始化失败。": "Could not initialize the control service.",
+    "控制服务未及时响应；失联后会尝试恢复系统控制。": "Control service timed out; it will try to restore system control after losing contact.",
+    "控制服务已结束。": "Control service has exited.",
+    "控制服务响应过长。": "Control service response is too long.",
+    "控制服务响应格式无效。": "Invalid control service response.",
+    "控制服务已断开；失联后会尝试恢复系统控制。": "Control service disconnected; it will try to restore system control.",
+    "恢复系统控制尚未确认。": "Restoration of system control is not confirmed yet.",
+    "控制服务仍在重试恢复系统控制。": "Control service is still retrying restoration of system control.",
+    "无法识别 FanCurve 的终端窗口。": "Could not identify FanCurve's Terminal window.",
+    "终端窗口操作超时。": "Terminal window operation timed out.",
+    "无法定位或操作 FanCurve 的 Terminal 窗口。": "Could not find or operate FanCurve's Terminal window.",
+    "菜单栏温度显示未能启动。": "Could not start the menu bar temperature display.",
+    "菜单栏温度显示已退出。": "The menu bar temperature display has exited.",
+    "无法连接菜单栏点击操作。": "Could not connect the menu bar click action.",
+    "温度": "Temperature",
+    "自动调速": "Automatic fan control",
+    "系统控制 / 只监测": "System control / monitoring only",
+    "读取或控制异常": "Reading or control error",
+    "正在读取硬件…": "Reading hardware…",
+    "其他程序正在控制风扇": "Another app controls the fans",
+    "系统自动控制 · 当前只监测": "System control · monitoring only",
+    "没有有效温度数据，不能开启自动调速。": "No valid temperature data; automatic fan control cannot start.",
+    "请先将 Macs Fan Control 恢复自动模式并退出，再开启自动调速。": "Restore automatic mode in Macs Fan Control and quit it before enabling FanCurve.",
+    "开启自动调速需要管理员授权。密码由 macOS sudo 验证。": "Automatic fan control needs administrator authorization. macOS sudo verifies your password.",
+    "管理员授权取消或失败。": "Administrator authorization was canceled or failed.",
+    "已恢复系统控制；已保存的曲线仅供预览。": "System control restored; the saved curve is only a preview.",
+    "恢复系统控制中 · 曲线未生效": "Restoring system control · curve inactive",
+    "[s] 请求恢复系统控制": "[s] Request system control",
+    "设置未保存 · 当前曲线仍生效": "Settings not saved · current curve remains active",
+    "[c] 修改设置    [s] 恢复系统控制": "[c] Edit settings    [s] System control",
+    "自动调速已开启 · 曲线正在生效": "Automatic fan control on · curve active",
+    "[s] 恢复系统控制": "[s] Restore system control",
+    "启用失败 · 曲线未生效": "Could not enable · curve inactive",
+    "[a] 重试自动调速    [s] 恢复系统控制": "[a] Retry control    [s] System control",
+    "设置未保存 · 曲线未生效": "Settings not saved · curve inactive",
+    "[c] 修改设置": "[c] Edit settings",
+    "读取失败 · 曲线未生效": "Reading failed · curve inactive",
+    "请检查硬件读数后重试": "Check hardware readings and retry",
+    "正在读取 · 曲线未生效": "Reading sensors · curve inactive",
+    "[a] 开启自动调速（读取成功后可用）": "[a] Enable control after a valid reading",
+    "其他程序正在控制风扇 · 曲线未生效": "Another app controls fans · curve inactive",
+    "请先退出其他风扇调速程序": "Quit the other fan control app first",
+    "[a] 开启模拟自动调速（无需授权）": "[a] Enable simulated fan control",
+    "[a] 授权并开启自动调速": "[a] Authorize automatic fan control",
+    "系统控制 · 曲线未生效": "System control · curve inactive",
+    "当前只监测；下方曲线和转速仅供预览。": "Monitoring only; the curve and speeds below are previews.",
+    "FanCurve  /  CPU 温度与风扇": "FanCurve  /  CPU temperature & fans",
+    "请将终端调整至至少 78 列 × 24 行。": "Resize Terminal to at least 78 columns × 24 rows.",
+    "[a] 自动调速   [s] 系统控制   [q] 退出": "[a] Auto control   [s] System control   [q] Quit",
+    "快捷键": "Keyboard shortcuts",
+    "a  开启按温度自动调速（演示模式无需授权）": "a  Enable temperature-based fan control (demo needs no authorization)",
+    "s  恢复系统风扇控制": "s  Restore system fan control",
+    "c  修改温度与平滑时间": "c  Edit temperature curve and smoothing time",
+    "设置中：↑↓ 选择，←→ 修改，Enter 保存，Esc 取消": "Editing: ↑↓ select, ←→ adjust, Enter save, Esc cancel",
+    "q  退出并请求恢复系统控制": "q  Quit and request system fan control",
+    "? / Esc  返回主界面": "? / Esc  Return to dashboard",
+    "平均温度 = 有效 CPU 核心读数的算术平均，再作滚动平均。": "Average temperature = mean of valid CPU core readings, then rolling mean.",
+    "0% 为风扇硬件最低转速；100% 为硬件最高转速。": "0% = hardware minimum RPM; 100% = hardware maximum RPM.",
+    "CPU/GPU 已知热点 ≥90°C 优先满速，低于85°C退出保护。": "Known CPU/GPU hotspot ≥90°C forces full speed; protection clears below 85°C.",
+    "退出、休眠、读数异常、失联12秒会尝试恢复系统控制。": "Quit, sleep, invalid readings, or 12-second disconnect restore system control.",
+    "不要与其他风扇调速软件同时控制同一台 Mac。": "Do not run another fan control app at the same time.",
+    "演示模式 · 模拟数据": "Demo mode · simulated data",
+    "Intel Mac · 无需编译 · 默认自动调速": "Intel Mac · no build step · automatic control by default",
+    "风扇": "Fan",
+    "实际RPM": "Actual RPM",
+    "当前目标": "Target",
+    "曲线预计": "Curve RPM",
+    "硬件范围": "Range",
+    "控制": "Mode",
+    "系统": "System",
+    "其他程序": "Other app",
+    "暂无硬件数据": "No hardware data yet",
+    "温度曲线已生效": "Temperature curve active",
+    "温度曲线预览 · 当前未生效": "Temperature curve preview · inactive",
+    "风扇较多，请增大终端高度查看温度曲线。": "Increase Terminal height to see the curve for all fans.",
+    "设置  /  ↑↓ 选择 · ←→ 调整 · Enter 保存 · Esc 取消": "Settings  /  ↑↓ select · ←→ adjust · Enter save · Esc cancel",
+    "开始加速": "Ramp from",
+    "达到满速": "Full speed",
+    "平滑时间": "Smoothing",
+    "秒": "sec",
+    "[a] 自动调速    [s] 系统控制    [c] 设置    [?] 帮助    [q] 退出": "[a] Auto    [s] System    [c] Settings    [?] Help    [q] Quit",
+    "0%=硬件最低转速；退出与休眠时恢复系统控制。": "0% = hardware minimum RPM; quitting or sleeping restores system control.",
+    "曲线已保存；当前仍由系统控制风扇。": "Curve saved; the system still controls the fans.",
+    "曲线已保存，但尚未生效。按 [a] 授权并开启自动调速。": "Curve saved but inactive. Press [a] to authorize automatic control.",
+    "退出演示": "Exiting demo",
+    "FanCurve 已退出。": "FanCurve has exited.",
+    "演示未操作真实风扇。": "Demo did not change real fans.",
+    "模拟数据 / 未访问硬件": "Simulated data / hardware not accessed",
+    "保护": "Protection",
+    "满速": "Full speed",
+    "模拟": "Demo",
+    "演示：8 个模拟核心": "Demo: 8 simulated cores",
+    "系统目录权限不安全，未安装：": "Unsafe system directory permissions; not installed: ",
+    "用户名无法安全写入 sudoers。": "Username cannot be safely written to sudoers.",
+    "受保护安装必须由普通用户运行 --install 并经 sudo 授权。": "Run --install as a regular user and authorize with sudo.",
+    "系统 sudoers 未启用 /private/etc/sudoers.d，未修改系统文件。": "System sudoers does not include /private/etc/sudoers.d; no system files were changed.",
+    "系统 Python 版本过旧，受保护控制服务需要 Python 3.9 或更新版本。": "System Python is too old; the protected service needs Python 3.9 or newer.",
+    "找不到系统 Python：/usr/bin/python3。请先安装 macOS 命令行工具。": "System Python /usr/bin/python3 was not found. Install macOS Command Line Tools first.",
+    "系统 Python 无法启动，请先安装 macOS 命令行工具（xcode-select --install）后重试。": "System Python could not start. Install macOS Command Line Tools (xcode-select --install) and retry.",
+    "无法识别系统 Python 版本，请检查 /usr/bin/python3。": "Could not identify the system Python version; check /usr/bin/python3.",
+    "无人值守调速安装仅支持 macOS。": "Unattended fan control installation is supported on macOS only.",
+    "一次性管理员安装需要终端，请在 Terminal 中运行此命令。": "One-time administrator installation needs a Terminal session.",
+    "FanCurve 需要一次管理员授权，以安装仅允许启动受保护控制服务的规则。": "FanCurve needs one administrator authorization to install its restricted helper rule.",
+    "管理员授权取消或失败，未完成安装。": "Administrator authorization was canceled or failed; installation is incomplete.",
+    "受保护控制服务安装失败，请查看上面的错误信息。": "Protected control service installation failed; see the error above.",
+    "登录自启仅支持 macOS。": "Login startup is supported on macOS only.",
+    "已移除 FanCurve 登录自启。": "FanCurve login startup removed.",
+    "未找到 FanCurve 登录自启。": "No FanCurve login startup was found.",
+    "请以普通用户安装登录项，不要使用 sudo。": "Install the login item as a regular user, without sudo.",
+    "请以普通用户移除登录项，不要使用 sudo。": "Remove the login item as a regular user, without sudo.",
+    "交互界面需要终端，请双击 启动.command 或在终端中运行；可用 --probe / --simulate。": "The interactive UI needs Terminal. Open a launcher or run the script there; --probe and --simulate work without a TTY.",
+    "请使用普通用户启动界面，按 a 时再申请管理员授权。": "Run the UI as a regular user; press a to request administrator authorization.",
+    "Intel Mac CPU 均温风扇控制，带终端界面，无需编译。": "Intel Mac fan control based on average CPU temperature, with a Terminal UI and no build step.",
+    "只读探测硬件，输出 JSON": "Read hardware and output JSON without changing fans",
+    "使用模拟数据体验终端界面": "Try the Terminal UI with simulated data",
+    "只监测；仍可按 a 手动开启自动调速": "Monitor only; press a to enable control manually",
+    "输出模拟调速过程": "Print a simulated fan-control sequence",
+    "一次授权安装无人值守调速和登录自启": "Install unattended control and login startup with one authorization",
+    "移除登录自启和受保护控制服务": "Remove login startup and the protected control service",
+    "启动后隐藏终端窗口；点击菜单栏温度可重新打开": "Hide Terminal after startup; click the menu bar temperature to reopen it",
+    "界面语言：zh 或 en": "Interface language: zh or en",
+}
+
+
+def translate_text(value: str) -> str:
+    if LANGUAGE != "en" or not value:
+        return value
+    if value in EN_TEXT:
+        return EN_TEXT[value]
+    if value.startswith("原因："):
+        return "Reason: " + translate_text(value[3:])
+    for source, target in (("无法应用设置：", "Could not apply settings: "),
+                           ("设置错误：", "Settings error: "),
+                           ("恢复系统控制失败，将继续重试：", "Could not restore system control; retrying: "),
+                           ("SMC 未确认写入，自动调速已停止。", "SMC did not confirm the write; automatic control stopped. "),
+                           ("最近温度  ", "Recent temperatures  "),
+                           ("系统目录权限不安全，未安装：", "Unsafe system directory permissions; not installed: "),
+                           ("已有同名受保护程序，未覆盖：", "Existing protected launcher is not managed by FanCurve; not overwritten: "),
+                           ("已有同名受保护脚本，未覆盖：", "Existing protected script is not managed by FanCurve; not overwritten: "),
+                           ("已有同名 sudoers 规则，未覆盖：", "Existing sudoers rule is not managed by FanCurve; not overwritten: "),
+                           ("sudoers 规则校验失败：", "Sudoers rule validation failed: "),
+                           ("系统 sudoers 校验失败，已撤回规则：", "System sudoers validation failed; rolled back the rule: "),
+                           ("sudoers 规则不属于 FanCurve，未删除：", "Sudoers rule is not managed by FanCurve; not removed: "),
+                           ("受保护程序不属于 FanCurve，未删除：", "Protected launcher is not managed by FanCurve; not removed: "),
+                           ("受保护脚本不属于 FanCurve，未删除：", "Protected script is not managed by FanCurve; not removed: "),
+                           ("找不到程序文件：", "Script was not found: "),
+                           ("现有登录项无法识别，未覆盖：", "Existing login item is unrecognized; not overwritten: "),
+                           ("现有登录项不属于 FanCurve，未覆盖：", "Existing login item is not managed by FanCurve; not overwritten: "),
+                           ("现有启动器不属于 FanCurve，未覆盖：", "Existing launcher is not managed by FanCurve; not overwritten: "),
+                           ("现有登录项无法识别，未删除：", "Existing login item is unrecognized; not removed: "),
+                           ("现有登录项不属于 FanCurve，未删除：", "Existing login item is not managed by FanCurve; not removed: ")):
+        if value.startswith(source):
+            return target + translate_text(value[len(source):])
+    if "；" in value:
+        return "; ".join(translate_text(part) for part in value.split("；"))
+    dynamic = (
+        (r"(?P<n>\d+) 个 CPU 核心传感器的平均值", "Average of {n} CPU core sensors"),
+        (r"CPU 封装温度 (?P<key>\S+)（无核心传感器）", "CPU package temperature {key} (no core sensors)"),
+        (r"不支持 SMC 数据类型 (?P<kind>.+)。", "Unsupported SMC data type {kind}."),
+        (r"不支持向 (?P<kind>.+) 写入这个数值。", "Cannot write this value to {kind}."),
+        (r"无法访问 AppleSMC（0x(?P<code>[0-9a-fA-F]+)）。", "Could not access AppleSMC (0x{code})."),
+        (r"SMC (?P<key>\S+) 操作失败（IO 0x(?P<io>[0-9a-fA-F]+)，SMC (?P<result>\d+)）。", "SMC {key} operation failed (IO 0x{io}, SMC {result})."),
+        (r"SMC (?P<key>\S+) 数据长度无效。", "Invalid SMC {key} data length."),
+        (r"风扇(?P<n>\d+)：目标(?P<target>[\d.]+)→回读(?P<readback>[\d.]+)RPM，模式(?P<mode>\d+)（(?P<label>系统|手动|未知)）", "Fan {n}: target {target}, readback {readback} RPM, mode {mode} ({label})"),
+        (r"风扇 (?P<n>\d+)", "Fan {n}"),
+        (r"CPU 平均温度 · (?P<seconds>[\d.]+) 秒平滑", "CPU mean · {seconds}s smoothing"),
+        (r"当前均温 (?P<average>[\d.]+)°C · 热点 (?P<hotspot>[\d.]+)°C", "Current mean {average}°C · hottest {hotspot}°C"),
+        (r"开始加速 (?P<start>[\d.]+)°C  →  满速 (?P<full>[\d.]+)°C     \[c\] 修改曲线", "Ramp from {start}°C  →  full speed {full}°C     [c] Edit curve"),
+        (r"(?P<prefix>[> ]{2})(?P<label>开始加速|达到满速|平滑时间)：(?P<number>[\d.]+) (?P<unit>°C|秒)(?P<pad> *)", "{prefix}{label}: {number} {unit}{pad}"),
+    )
+    for pattern, template in dynamic:
+        match = re.fullmatch(pattern, value)
+        if match:
+            fields = {key: translate_text(item) for key, item in match.groupdict().items()}
+            return template.format(**fields)
+    return value
+
+
 @dataclasses.dataclass(frozen=True)
 class Config:
     start: float = 50.0
@@ -906,7 +1131,7 @@ class MenuBarClient:
     """Keep AppKit on a separate process's main thread, away from curses."""
     def __init__(self) -> None:
         self.process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--menu-bar"],
+            [sys.executable, str(Path(__file__).resolve()), "--menu-bar", "--lang", LANGUAGE],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             start_new_session=True)
         self.last_state: tuple[float | None, bool, bool] | None = None
@@ -1006,7 +1231,7 @@ def run_menu_bar() -> int:
     image_class = cls("NSImage")
     symbol_selector = objc.sel_registerName(b"imageWithSystemSymbolName:accessibilityDescription:")
     symbol = (send(image_class, "imageWithSystemSymbolName:accessibilityDescription:",
-                   C.c_void_p, (C.c_void_p, C.c_void_p), string("thermometer.medium"), string("温度"))
+                   C.c_void_p, (C.c_void_p, C.c_void_p), string("thermometer.medium"), string(translate_text("温度")))
               if send(image_class, "respondsToSelector:", C.c_bool,
                       (C.c_void_p,), symbol_selector) else None)
     if symbol:
@@ -1073,7 +1298,9 @@ def run_menu_bar() -> int:
                         try:
                             update_on_main(button, "setTitle:", string(title))
                             update_on_main(button, "setToolTip:",
-                                           string(f"FanCurve · CPU 平滑均温 {menu_temperature(value)} · {detail}"))
+                                           string((f"FanCurve · smoothed CPU {menu_temperature(value)} · {translate_text(detail)}"
+                                                   if LANGUAGE == "en" else
+                                                   f"FanCurve · CPU 平滑均温 {menu_temperature(value)} · {detail}")))
                         finally:
                             send(thread_pool, "drain", None)
                     except (ValueError, TypeError, AttributeError):
@@ -1215,7 +1442,7 @@ class TerminalUI:
                     curses.def_prog_mode()
                     curses.endwin()
                     try:
-                        print("\n开启自动调速需要管理员授权。密码由 macOS sudo 验证。\n", flush=True)
+                        print("\n" + translate_text("开启自动调速需要管理员授权。密码由 macOS sudo 验证。") + "\n", flush=True)
                         completed = subprocess.run(["/usr/bin/sudo", "-v"], check=False)
                         if completed.returncode:
                             raise FanError("管理员授权取消或失败。")
@@ -1299,7 +1526,7 @@ class TerminalUI:
         height, width = screen.getmaxyx()
         if 0 <= row < height and 0 <= col < width - 1:
             try:
-                screen.addstr(row, col, _clip(text, width - col - 1), style)
+                screen.addstr(row, col, _clip(translate_text(text), width - col - 1), style)
             except curses.error:
                 pass
 
@@ -1318,7 +1545,8 @@ class TerminalUI:
         status_style = good if tone == "active" else warning if tone == "error" else dim
         self.text(screen, 1, 32, title, status_style | curses.A_BOLD)
         self.text(screen, 2, 32, action, accent)
-        for offset, line in enumerate(_wrap("原因：" + detail if tone == "error" else detail,
+        for offset, line in enumerate(_wrap(("Reason: " if LANGUAGE == "en" else "原因：") + translate_text(detail)
+                                            if tone == "error" else translate_text(detail),
                                             max(1, width - 34), limit=3)):
             self.text(screen, 3 + offset, 32, line, warning if tone == "error" else dim)
         if height < 24 or width < 78:
@@ -1513,20 +1741,24 @@ class TerminalUI:
         if self.hardware:
             self.hardware.close()
         if self.exit_warning:
-            print("\n" + self.exit_warning, file=sys.stderr)
+            print("\n" + translate_text(self.exit_warning), file=sys.stderr)
         else:
-            print("\nFanCurve 已退出。" + ("演示未操作真实风扇。" if self.demo else ""))
+            print("\n" + translate_text("FanCurve 已退出。") +
+                  (translate_text("演示未操作真实风扇。") if self.demo else ""))
 
 
 def simulate() -> None:
     controller = Controller()
     config = Config()
-    print("模拟数据 / 未访问硬件\nCPU     平滑均温   风扇1 RPM  风扇2 RPM  保护")
+    if LANGUAGE == "en":
+        print("Simulated data / hardware not accessed\nCPU     Smoothed    Fan 1 RPM  Fan 2 RPM  Protection")
+    else:
+        print("模拟数据 / 未访问硬件\nCPU     平滑均温   风扇1 RPM  风扇2 RPM  保护")
     for i, temperature in enumerate([40, 50, 60, 70, 80, 93, 87, 83, 65, 45]):
         sample = Sample({"DEMO": temperature}, "模拟", temperature,
                         [Fan(0, 1800, 5500, 1800, 1800), Fan(1, 1600, 5000, 1600, 1600)])
         d = controller.update(sample, config, i * 2)
-        print(f"{temperature:3.0f}°C   {d.smoothed:5.1f}°C    {d.targets[0]:6.0f}     {d.targets[1]:6.0f}     {'满速' if d.emergency else '—'}")
+        print(f"{temperature:3.0f}°C   {d.smoothed:5.1f}°C    {d.targets[0]:6.0f}     {d.targets[1]:6.0f}     {translate_text('满速') if d.emergency else '—'}")
 
 
 def _login_paths(home: Path) -> tuple[Path, Path]:
@@ -1684,16 +1916,17 @@ def _run_privileged_installer(mode: str) -> None:
         raise FanError("一次性管理员安装需要终端，请在 Terminal 中运行此命令。")
     interpreter = Path("/usr/bin/python3")
     _require_system_python(interpreter)
-    print("\nFanCurve 需要一次管理员授权，以安装仅允许启动受保护控制服务的规则。\n", flush=True)
+    print("\n" + translate_text("FanCurve 需要一次管理员授权，以安装仅允许启动受保护控制服务的规则。") + "\n", flush=True)
     if subprocess.run(["/usr/bin/sudo", "-v"], check=False).returncode:
         raise FanError("管理员授权取消或失败，未完成安装。")
-    command = ["/usr/bin/sudo", "-n", str(interpreter), "-I", "-u", str(Path(__file__).resolve()), mode]
+    command = ["/usr/bin/sudo", "-n", str(interpreter), "-I", "-u", str(Path(__file__).resolve()),
+               mode, "--lang", LANGUAGE]
     if subprocess.run(command, check=False).returncode:
         raise FanError("受保护控制服务安装失败，请查看上面的错误信息。")
 
 
 def install_login_agent(script_path: Path | None = None, home: Path | None = None,
-                        uv_path: str | None = None) -> tuple[Path, Path]:
+                        uv_path: str | None = None, language: str | None = None) -> tuple[Path, Path]:
     """Install a per-user login item; never start fan control during installation."""
     if platform.system() != "Darwin":
         raise FanError("登录自启仅支持 macOS。")
@@ -1716,7 +1949,10 @@ def install_login_agent(script_path: Path | None = None, home: Path | None = Non
     command = (f"{shlex.quote(str(Path(uv_executable).resolve()))} run --no-project "
                f"{shlex.quote(str(script))}" if uv_executable else
                f"{shlex.quote(str(Path(sys.executable).resolve()))} {shlex.quote(str(script))}")
-    command += " --start-hidden"
+    selected_language = language or LANGUAGE
+    if selected_language not in ("zh", "en"):
+        raise FanError("Unsupported language.")
+    command += f" --lang {selected_language} --start-hidden"
     cache = user_home / "Library" / "Caches" / "FanCurve" / "uv"
     launcher = ("#!/bin/sh\n" + LOGIN_LAUNCHER_MARKER + "\n" +
                 f"export UV_CACHE_DIR={shlex.quote(str(cache))}\n" +
@@ -1752,20 +1988,27 @@ def uninstall_login_agent(home: Path | None = None) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Intel Mac CPU 均温风扇控制，带终端界面，无需编译。")
+    global LANGUAGE
+    language_parser = argparse.ArgumentParser(add_help=False)
+    language_parser.add_argument("--lang", choices=("zh", "en"), default="zh")
+    language_args, _ = language_parser.parse_known_args()
+    LANGUAGE = language_args.lang
+    parser = argparse.ArgumentParser(description=translate_text("Intel Mac CPU 均温风扇控制，带终端界面，无需编译。"))
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--probe", action="store_true", help="只读探测硬件，输出 JSON")
-    modes.add_argument("--demo", action="store_true", help="使用模拟数据体验终端界面")
-    modes.add_argument("--monitor", action="store_true", help="只监测；仍可按 a 手动开启自动调速")
-    modes.add_argument("--simulate", action="store_true", help="输出模拟调速过程")
-    modes.add_argument("--install", action="store_true", help="一次授权安装无人值守调速和登录自启")
-    modes.add_argument("--uninstall", action="store_true", help="移除登录自启和受保护控制服务")
+    modes.add_argument("--probe", action="store_true", help=translate_text("只读探测硬件，输出 JSON"))
+    modes.add_argument("--demo", action="store_true", help=translate_text("使用模拟数据体验终端界面"))
+    modes.add_argument("--monitor", action="store_true", help=translate_text("只监测；仍可按 a 手动开启自动调速"))
+    modes.add_argument("--simulate", action="store_true", help=translate_text("输出模拟调速过程"))
+    modes.add_argument("--install", action="store_true", help=translate_text("一次授权安装无人值守调速和登录自启"))
+    modes.add_argument("--uninstall", action="store_true", help=translate_text("移除登录自启和受保护控制服务"))
     modes.add_argument("--install-root", action="store_true", help=argparse.SUPPRESS)
     modes.add_argument("--uninstall-root", action="store_true", help=argparse.SUPPRESS)
     modes.add_argument("--helper", action="store_true", help=argparse.SUPPRESS)
     modes.add_argument("--menu-bar", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--start-hidden", action="store_true",
-                        help="启动后隐藏终端窗口；点击菜单栏温度可重新打开")
+                        help=translate_text("启动后隐藏终端窗口；点击菜单栏温度可重新打开"))
+    parser.add_argument("--lang", choices=("zh", "en"), default=LANGUAGE,
+                        help=translate_text("界面语言：zh 或 en"))
     args = parser.parse_args()
     try:
         if args.install:
@@ -1773,12 +2016,15 @@ def main() -> int:
                 raise FanError("请以普通用户安装登录项，不要使用 sudo。")
             _run_privileged_installer("--install-root")
             agent_path, _ = install_login_agent()
-            print(f"已安装无人值守调速：{agent_path}\n下次登录后会在后台调速并显示菜单栏温度；点击图标可打开终端界面。")
+            if LANGUAGE == "en":
+                print(f"Unattended fan control installed: {agent_path}\nOn your next login, FanCurve will control the fans in the background and show temperature in the menu bar. Click the icon to open Terminal.")
+            else:
+                print(f"已安装无人值守调速：{agent_path}\n下次登录后会在后台调速并显示菜单栏温度；点击图标可打开终端界面。")
         elif args.uninstall:
             if os.geteuid() == 0:
                 raise FanError("请以普通用户移除登录项，不要使用 sudo。")
             _run_privileged_installer("--uninstall-root")
-            print("已移除 FanCurve 登录自启。" if uninstall_login_agent() else "未找到 FanCurve 登录自启。")
+            print(translate_text("已移除 FanCurve 登录自启。" if uninstall_login_agent() else "未找到 FanCurve 登录自启。"))
         elif args.install_root:
             install_privileged_helper()
         elif args.uninstall_root:
@@ -1788,7 +2034,9 @@ def main() -> int:
         elif args.probe:
             hardware = Hardware()
             try:
-                print(json.dumps(hardware.sample().to_dict(), ensure_ascii=False, indent=2, allow_nan=False))
+                payload = hardware.sample().to_dict()
+                payload["source"] = translate_text(payload["source"])
+                print(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False))
             finally:
                 hardware.close()
         elif args.helper:
@@ -1814,7 +2062,7 @@ def main() -> int:
     except KeyboardInterrupt:
         return 130
     except (FanError, OSError, ValueError, curses.error) as error:
-        print(str(error), file=sys.stderr)
+        print(translate_text(str(error)), file=sys.stderr)
         return 1
 
 

@@ -2,6 +2,7 @@ import math
 import itertools
 import os
 import plistlib
+import re
 import stat
 import struct
 import tempfile
@@ -41,6 +42,7 @@ class LoginAgentTests(unittest.TestCase):
             self.assertIn("/opt/homebrew/bin/uv", launcher_text)
             self.assertIn("uv run --no-project", launcher_text)
             self.assertIn("--start-hidden", launcher_text)
+            self.assertIn("--lang zh", launcher_text)
 
             with plist_path.open("rb") as stream:
                 agent = plistlib.load(stream)
@@ -65,6 +67,15 @@ class LoginAgentTests(unittest.TestCase):
             launcher = home / "Library/Application Support/FanCurve/启动.command"
             self.assertIn(str(second_script), launcher.read_text(encoding="utf-8"))
             self.assertNotIn(str(first_script), launcher.read_text(encoding="utf-8"))
+
+    def test_english_install_persists_language_for_login(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            script = home / "fan_curve.py"
+            script.write_text("# test script\n", encoding="utf-8")
+            fc.install_login_agent(script_path=script, home=home, uv_path="/tools/uv", language="en")
+            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            self.assertIn("--lang en --start-hidden", launcher.read_text(encoding="utf-8"))
 
     def test_uninstall_removes_only_owned_files_and_preserves_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -456,6 +467,63 @@ class SessionTests(unittest.TestCase):
 
 
 class TerminalUITests(unittest.TestCase):
+    def test_english_demo_dashboard_help_and_settings_have_no_chinese(self):
+        class FakeScreen:
+            def __init__(self):
+                self.cells = []
+
+            def getmaxyx(self):
+                return 30, 110
+
+            def erase(self):
+                self.cells.clear()
+
+            def addstr(self, row, col, text, style=0):
+                self.cells.append(text)
+
+            def refresh(self):
+                pass
+
+        ui = fc.TerminalUI(demo=True)
+        ui.sample = fc.DemoHardware().sample()
+        ui.smoothed = 69.5
+        ui.active = True
+        ui.message = "正在按 CPU 平均温度调速"
+        ui.history.append(69.5)
+        screen = FakeScreen()
+        with patch.object(fc, "LANGUAGE", "en"), patch("fan_curve.curses.color_pair", return_value=0):
+            for mode in ("dashboard", "help", "settings"):
+                ui.help = mode == "help"
+                ui.edit = fc.Config() if mode == "settings" else None
+                ui.draw(screen)
+                visible = "\n".join(screen.cells)
+                self.assertIsNone(re.search(r"[\u4e00-\u9fff]", visible), mode)
+                self.assertIn("FanCurve  /  CPU temperature & fans", visible)
+                if mode == "dashboard":
+                    self.assertIn("Automatic fan control on", visible)
+                    self.assertIn("Demo: 8 simulated cores", visible)
+                elif mode == "help":
+                    self.assertIn("Keyboard shortcuts", visible)
+                else:
+                    self.assertIn("Settings  /", visible)
+
+    def test_english_dynamic_diagnostics_and_sensor_source(self):
+        with patch.object(fc, "LANGUAGE", "en"):
+            self.assertEqual(fc.translate_text("8 个 CPU 核心传感器的平均值"),
+                             "Average of 8 CPU core sensors")
+            self.assertEqual(fc.translate_text("CPU 封装温度 TC0P（无核心传感器）"),
+                             "CPU package temperature TC0P (no core sensors)")
+            self.assertEqual(fc.translate_text("风扇 2"), "Fan 2")
+            self.assertEqual(fc.translate_text("原因：没有有效的 CPU 温度或风扇数据。"),
+                             "Reason: No valid CPU temperature or fan data.")
+            diagnostic = ("SMC 未确认写入，自动调速已停止。"
+                          "风扇1：目标3240→回读1800RPM，模式1（手动）；"
+                          "风扇2：目标3000→回读2200RPM，模式1（手动）")
+            translated = fc.translate_text(diagnostic)
+            self.assertIn("Fan 1: target 3240, readback 1800 RPM", translated)
+            self.assertIn("Fan 2: target 3000, readback 2200 RPM", translated)
+            self.assertIsNone(re.search(r"[\u4e00-\u9fff]", translated))
+
     def test_terminal_window_action_targets_only_the_current_tty(self):
         completed = fc.subprocess.CompletedProcess([], 0, stdout="ok\n", stderr="")
         with patch.object(fc.os, "ttyname", return_value="/dev/ttys123"), \
