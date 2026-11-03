@@ -4,3 +4,4 @@ __pycache__/
 .fancurve.json
 .fancurve.tmp
 .DS_Store
+dist/

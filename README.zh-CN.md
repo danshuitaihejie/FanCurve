@@ -2,7 +2,7 @@
 
 [English](README.md) · 简体中文
 
-FanCurve 是面向 **Intel Mac** 的终端风扇控制工具。它按 CPU 核心平均温度调速，在终端显示实时温度、风扇转速与曲线，并在 macOS 菜单栏显示温度。程序是单文件 Python 脚本，无需编译，也不依赖第三方 Python 包。**不支持 Apple Silicon。**
+FanCurve 是面向 **Intel Mac** 的终端风扇控制工具。它按 CPU 核心平均温度调速，在终端显示实时温度、风扇转速与曲线，并在 macOS 菜单栏显示温度。源代码是单文件 Python 脚本，不依赖第三方 Python 包。**不支持 Apple Silicon。**
 
 ![FanCurve 中文演示界面](docs/screenshots/fancurve-zh.png)
 
@@ -20,12 +20,24 @@ cd FanCurve
 uv run --no-project fan_curve.py --demo --lang zh
 ```
 
-如果没有 `git`，也可从 GitHub 下载仓库 ZIP。确认适用后，`uv run --no-project fan_curve.py --monitor --lang zh` 只读监测；`uv run --no-project fan_curve.py --lang zh` 会在读到有效温度后请求授权并尝试调速。也可以双击 `启动.command`（中文）或 `Launch in English.command`（英文）；启动器会优先使用 PATH 中的 `uv`，其次尝试 `$HOME/.local/bin/uv`，最后使用 `python3`。
+如果没有 `git`，也可从 GitHub 下载仓库 ZIP。确认适用后，`uv run --no-project fan_curve.py --monitor --lang zh` 只读监测；`uv run --no-project fan_curve.py --lang zh` 会在读到有效温度后请求授权并尝试调速。也可以双击 `Launch.command`（默认中文）或 `Launch-English.command`（英文）；启动器会优先使用 PATH 中的 `uv`，其次尝试 `$HOME/.local/bin/uv`，最后使用 `python3`。
 
-两种语言共用同一份控制逻辑和配置。使用 `--lang zh` 或 `--lang en` 选择界面语言；安装登录项时所选语言也会用于以后每次登录。
+两种语言共用同一份控制逻辑和风扇曲线。`--lang` 支持 `auto`、`zh` 和 `en`；直接运行 CLI 时默认中文，app 默认根据系统语言或已保存偏好选择。安装登录项时所选语言也会用于以后每次登录。
 
 只监测模式仍可按 `a` 手动启用调速。`--demo` 使用模拟数据，并默认自动启用模拟调速，不会操作真实风扇。
 手动运行时窗口默认可见；如果也想先隐藏它，可加 `--start-hidden`。
+
+### macOS app
+
+在安装了命令行工具、并且 `/usr/bin/python3` 版本为 3.9 或更高的 macOS 上运行以下命令构建本地 app 和 ZIP：
+
+```sh
+UV_CACHE_DIR=.work/uv-cache uv run --no-project build_app.py
+```
+
+命令会生成 `dist/FanCurve.app` 和 `dist/FanCurve-macOS.zip`。app 是包含脚本的 macOS `.app` 启动器，会打开 Terminal TUI 和菜单栏程序；它使用系统的 `/usr/bin/python3`，不包含独立嵌入式 Python。可将 `FanCurve.app` 拖入 Applications。首次启动时会创建 `~/Library/Application Support/FanCurve/FanCurve.terminal`，并导入专属的 FanCurve Terminal 描述文件。该描述文件使用 100×32 窗口、关闭时不询问，并在程序正常退出后自动关闭窗口；只会使用 FanCurve 专属描述文件。app 默认根据系统语言或已保存偏好选择中英文，在界面按 `l` 可切换并保存偏好。
+
+app 设置保存在 `~/Library/Application Support/FanCurve/settings.json`；直接运行 TUI 命令时仍使用脚本旁的 `.fancurve.json`。从源码目录运行 `uv run --no-project fan_curve.py --launch-app --lang en` 也会通过专属描述文件启动 app；直接运行 TUI 的命令仍可使用。生成包为本地 ad hoc 签名，未使用 Developer ID 签名或公证，也不通过 App Store 分发。
 
 ## 登录时启动
 
@@ -35,7 +47,7 @@ uv run --no-project fan_curve.py --demo --lang zh
 uv run --no-project fan_curve.py --install --lang zh
 ```
 
-安装期间需要输入一次管理员密码。`--install` 会把受保护的控制脚本和固定启动器安装到 `/Library/PrivilegedHelperTools`，并在 `/private/etc/sudoers.d/fancurve` 写入仅允许当前用户无密码、无参数启动该固定 helper 的规则；如果这些目录尚不存在，安装器会核验其父目录权限后创建，并用 `visudo` 校验规则。随后会在 `~/Library/Application Support/FanCurve/启动.command` 创建可执行启动器，并在 `~/Library/LaunchAgents/com.fancurve.login.plist` 创建当前用户登录项。登录项会在后台打开 Terminal，读取有效温度、启动菜单栏图标和自动调速后，只最小化 FanCurve 所在的终端窗口。安装本身不会启动调速，也不会保存管理员密码。
+安装期间需要输入一次管理员密码。`--install` 会把受保护的控制脚本和固定启动器安装到 `/Library/PrivilegedHelperTools`，并在 `/private/etc/sudoers.d/fancurve` 写入仅允许当前用户无密码、无参数启动该固定 helper 的规则；如果这些目录尚不存在，安装器会核验其父目录权限后创建，并用 `visudo` 校验规则。随后会在 `~/Library/Application Support/FanCurve/Launch.command` 创建可执行启动器，并在 `~/Library/LaunchAgents/com.fancurve.login.plist` 创建当前用户登录项。登录项通过专属 Terminal 描述文件启动，读取有效温度、启动菜单栏图标和自动调速后，只最小化 FanCurve 所在的终端窗口。安装可迁移旧版生成的中文 `启动.command`。安装本身不会启动调速，也不会保存管理员密码。
 
 如果移动了 `fan_curve.py`、更换语言或更新了风扇控制服务逻辑，请在新位置重新运行 `uv run --no-project fan_curve.py --install --lang zh`（英文用 `--lang en`），以更新受保护副本和登录启动器。仅更新终端或菜单栏界面时，替换原脚本并重启程序即可。运行 `uv run --no-project fan_curve.py --uninstall` 可移除受保护 helper、sudoers 规则、登录项和启动器；卸载需要一次管理员授权，并保留原脚本及配置。
 
@@ -43,6 +55,7 @@ uv run --no-project fan_curve.py --install --lang zh
 
 ## 界面操作
 
+- `l`：切换中文与英文；通过 app 启动时会保存语言偏好。
 - `a`：请求开启或重试自动调速。默认启动时程序会在首次有效采样后自动执行一次相同的授权和开启流程。程序会先暂停终端界面，通过 `sudo -v` 请求授权，然后以非交互方式启动仅在本次会话运行的 helper；只有成功开启后才会接管风扇，不会安装常驻服务。开启失败的原因会保留在顶部状态区域。
 - `s`：恢复系统风扇控制。
 - `c`：打开设置。使用上下方向键选择字段、左右方向键调整，按 Enter 保存，按 Esc 取消。保存只更新曲线参数，不会自动开启控制；需按 `a` 并成功开启自动模式后曲线才会生效。自动模式运行时保存的新配置会立即应用。
@@ -55,7 +68,7 @@ uv run --no-project fan_curve.py --install --lang zh
 
 默认曲线在 50°C 到 80°C 之间，将 CPU 平均温度线性映射到风扇硬件报告的最低和最高转速。温度采用 6 秒平滑，控制采样和界面刷新间隔均为 2 秒。终端窗口至少需要 78 列 × 24 行。CPU 或 GPU 已知热点达到 90°C 时优先满速，所有已知热点低于 85°C 后退出保护。SMC 写入后会在短时间内重读模式与目标转速；若仍无法确认，程序停止自动调速、请求恢复系统控制，并显示各风扇请求与回读的数值。
 
-Macs Fan Control 已安装时，请先在其中恢复自动模式并退出，避免控制器争抢风扇。按 `q` 退出时程序会请求恢复系统风扇控制；helper 失去 12 秒心跳后会尝试恢复系统风扇控制并退出；恢复失败时会继续重试，但不能绝对保证恢复成功。进程被 `SIGKILL` 强制终止时无法保证执行恢复操作。
+Macs Fan Control 已安装时，请先在其中恢复自动模式并退出，避免控制器争抢风扇。按 `q` 退出时程序会请求恢复系统风扇控制；helper 失去 12 秒心跳后会尝试恢复系统风扇控制并退出；恢复失败时会继续重试，但不能绝对保证恢复成功。关机期间 TUI 仍在 Terminal 窗口中运行，因此 Terminal 可能询问是否关闭窗口。macOS 发送的 `SIGTERM` 和 `SIGHUP` 会触发正常清理流程，并请求 helper 恢复系统风扇控制。强制 `SIGKILL` 仍无法保证执行清理。这里描述的是信号处理路径；尚未验证真实关机或真实硬件恢复。
 
 ## 诊断与模拟
 
@@ -87,4 +100,4 @@ UV_CACHE_DIR=.work/uv-cache uv run --no-project -m unittest discover -s tests -v
 
 测试覆盖由 `tests/test_fan_curve.py` 提供，包括仅在临时目录中构建和移除受保护安装文件的测试。硬件写入需管理员授权；文档中的模拟和只读诊断不代表已完成真实设备风扇写入验证。
 
-SMC 接口结构参考 [SMCKit](https://github.com/beltex/SMCKit)，通过 Python `ctypes` 独立实现。核心温度不可用时会采用 CPU 封装传感器，并在界面中注明。配置保存在程序旁的 `.fancurve.json`；普通模式每次启动都会重新请求自动调速授权，已安装受保护 helper 时登录后可无人值守开启。
+SMC 接口结构参考 [SMCKit](https://github.com/beltex/SMCKit)，通过 Python `ctypes` 独立实现。核心温度不可用时会采用 CPU 封装传感器，并在界面中注明。直接运行 TUI 时配置保存在程序旁的 `.fancurve.json`；app 设置保存在 `~/Library/Application Support/FanCurve/settings.json`。普通模式每次启动都会重新请求自动调速授权，已安装受保护 helper 时登录后可无人值守开启。构建与运行需要 macOS、`/usr/bin/python3` 3.9 或更高版本和命令行工具。

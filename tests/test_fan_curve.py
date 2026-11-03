@@ -3,13 +3,15 @@ import itertools
 import os
 import plistlib
 import re
+import shlex
+import signal
 import stat
 import struct
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import fan_curve as fc
 
@@ -25,6 +27,11 @@ def sample(cpu=50.0, hottest=None, fans=None, sensors=None):
 
 
 class LoginAgentTests(unittest.TestCase):
+    def setUp(self):
+        self.platform_patcher = patch.object(fc.platform, "system", return_value="Darwin")
+        self.platform_patcher.start()
+        self.addCleanup(self.platform_patcher.stop)
+
     def test_install_generates_login_agent_and_executable_launcher(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
@@ -33,7 +40,7 @@ class LoginAgentTests(unittest.TestCase):
             script.write_text("# test script\n", encoding="utf-8")
             fc.install_login_agent(script_path=script, home=home, uv_path="/opt/homebrew/bin/uv")
 
-            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            launcher = home / "Library/Application Support/FanCurve/Launch.command"
             plist_path = home / "Library/LaunchAgents/com.fancurve.login.plist"
             self.assertTrue(launcher.is_file())
             self.assertTrue(os.access(launcher, os.X_OK))
@@ -41,8 +48,7 @@ class LoginAgentTests(unittest.TestCase):
             self.assertIn(str(script), launcher_text)
             self.assertIn("/opt/homebrew/bin/uv", launcher_text)
             self.assertIn("uv run --no-project", launcher_text)
-            self.assertIn("--start-hidden", launcher_text)
-            self.assertIn("--lang zh", launcher_text)
+            self.assertIn("--launch-app --lang zh --start-hidden", launcher_text)
 
             with plist_path.open("rb") as stream:
                 agent = plistlib.load(stream)
@@ -50,7 +56,7 @@ class LoginAgentTests(unittest.TestCase):
             self.assertTrue(agent["RunAtLoad"])
             self.assertEqual(agent["LimitLoadToSessionType"], "Aqua")
             self.assertEqual(agent["ProgramArguments"], [
-                "/usr/bin/open", "-g", "-a", "Terminal", str(launcher.resolve()),
+                "/bin/sh", str(launcher.resolve()),
             ])
 
     def test_reinstall_updates_launcher_script_path(self):
@@ -64,7 +70,7 @@ class LoginAgentTests(unittest.TestCase):
             fc.install_login_agent(script_path=first_script, home=home, uv_path="/tools/uv")
             fc.install_login_agent(script_path=second_script, home=home, uv_path="/tools/uv")
 
-            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            launcher = home / "Library/Application Support/FanCurve/Launch.command"
             self.assertIn(str(second_script), launcher.read_text(encoding="utf-8"))
             self.assertNotIn(str(first_script), launcher.read_text(encoding="utf-8"))
 
@@ -74,8 +80,8 @@ class LoginAgentTests(unittest.TestCase):
             script = home / "fan_curve.py"
             script.write_text("# test script\n", encoding="utf-8")
             fc.install_login_agent(script_path=script, home=home, uv_path="/tools/uv", language="en")
-            launcher = home / "Library/Application Support/FanCurve/启动.command"
-            self.assertIn("--lang en --start-hidden", launcher.read_text(encoding="utf-8"))
+            launcher = home / "Library/Application Support/FanCurve/Launch.command"
+            self.assertIn("--launch-app --lang en --start-hidden", launcher.read_text(encoding="utf-8"))
 
     def test_uninstall_removes_only_owned_files_and_preserves_configuration(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,7 +90,7 @@ class LoginAgentTests(unittest.TestCase):
             script.parent.mkdir(parents=True)
             script.write_text("# test script\n", encoding="utf-8")
             fc.install_login_agent(script_path=script, home=home, uv_path="/tools/uv")
-            launcher = home / "Library/Application Support/FanCurve/启动.command"
+            launcher = home / "Library/Application Support/FanCurve/Launch.command"
             plist_path = home / "Library/LaunchAgents/com.fancurve.login.plist"
             config = script.with_name(".fancurve.json")
             config.parent.mkdir(parents=True, exist_ok=True)
@@ -102,6 +108,127 @@ class LoginAgentTests(unittest.TestCase):
             self.assertTrue(script.parent.exists())
             self.assertTrue(unrelated.exists())
             self.assertTrue(other_agent.exists())
+
+    def test_install_removes_owned_legacy_launcher_and_preserves_unowned_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            script = home / "source" / "fan_curve.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("# test script\n", encoding="utf-8")
+            support = home / "Library/Application Support/FanCurve"
+            support.mkdir(parents=True)
+            legacy = support / "\u542f\u52a8.command"
+            legacy.write_text(f"#!/bin/sh\n{fc.LOGIN_LAUNCHER_MARKER}\n", encoding="utf-8")
+            unrelated_legacy = support / "old-notes.command"
+            unrelated_legacy.write_text("#!/bin/sh\necho keep\n", encoding="utf-8")
+
+            fc.install_login_agent(script_path=script, home=home, uv_path="/tools/uv")
+
+            self.assertFalse(legacy.exists())
+            self.assertTrue(unrelated_legacy.exists())
+            self.assertTrue((support / "Launch.command").exists())
+
+    def test_dedicated_terminal_profile_has_window_and_close_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            profile_path = fc.write_terminal_profile(home)
+            preferences = home / "Library/Preferences/com.apple.Terminal.plist"
+            with profile_path.open("rb") as stream:
+                profile = plistlib.load(stream)
+
+            self.assertEqual(profile_path, home / "Library/Application Support/FanCurve/FanCurve.terminal")
+            self.assertEqual(profile["name"], "FanCurve")
+            self.assertEqual((profile["columnCount"], profile["rowCount"]), (100, 32))
+            self.assertEqual(profile["warnOnShellCloseAction"], 0)
+            self.assertEqual(profile["shellExitAction"], 1)
+            self.assertFalse(preferences.exists())
+
+    def test_app_migrates_legacy_curve_without_overwriting_new_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            old_script = home / "old source" / "fan_curve.py"
+            old_script.parent.mkdir()
+            old_script.with_name(".fancurve.json").write_text(
+                '{"start": 50, "full": 68, "window": 6}', encoding="utf-8")
+            support = home / "Library/Application Support/FanCurve"
+            support.mkdir(parents=True)
+            (support / "\u542f\u52a8.command").write_text(
+                f"{fc.LOGIN_LAUNCHER_MARKER}\nexec uv run --no-project {shlex.quote(str(old_script))}\n",
+                encoding="utf-8")
+            bundled_script = home / "FanCurve.app/Contents/Resources/fan_curve.py"
+            fc.migrate_app_config(bundled_script, home)
+            destination = support / "settings.json"
+            with patch.object(fc, "SETTINGS_PATH", destination):
+                self.assertEqual(fc.load_config().full, 68)
+            destination.write_text('{"start": 51, "full": 80, "window": 7}', encoding="utf-8")
+            fc.migrate_app_config(bundled_script, home)
+            with patch.object(fc, "SETTINGS_PATH", destination):
+                self.assertEqual(fc.load_config().start, 51)
+
+    def test_launch_terminal_quotes_paths_and_uses_dedicated_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory) / "Home with spaces ' and quotes"
+            home.mkdir()
+            script = home / "source dir" / "fan 'curve.py"
+            script.parent.mkdir()
+            script.write_text("# test script\n", encoding="utf-8")
+            uv_path = "/tools/uv 'quoted path"
+            completed = fc.subprocess.CompletedProcess([], 0, stdout="launched\n", stderr="")
+            with patch.object(fc.subprocess, "run", return_value=completed) as run:
+                result = fc.launch_terminal(script_path=script, home=home, language="en",
+                                            mode="demo", start_hidden=True, uv_path=uv_path)
+
+            self.assertEqual(result, "launched")
+            args = run.call_args.args[0]
+            self.assertEqual(args[0], "/usr/bin/osascript")
+            self.assertEqual(args[3], str(home / "Library/Application Support/FanCurve/FanCurve.terminal"))
+            self.assertEqual(args[-1], "hide")
+            self.assertIn('settings set "FanCurve"', args[2])
+            self.assertIn('name of current settings of t is "FanCurve"', args[2])
+            export, exec_command = args[4].split("; exec ", 1)
+            self.assertEqual(shlex.split(export)[1], "UV_CACHE_DIR=" + str(home / "Library/Application Support/FanCurve/uv-cache"))
+            parsed_command = shlex.split("exec " + exec_command)[1:]
+            self.assertEqual(parsed_command[:3], [uv_path, "run", "--no-project"])
+            self.assertEqual(parsed_command[3], str(script.resolve()))
+            self.assertEqual(parsed_command[-5:-2], ["--lang", "en", "--app-settings"])
+            self.assertIn("--demo", parsed_command)
+            self.assertIn("--start-hidden", parsed_command)
+
+
+class ShutdownSignalTests(unittest.TestCase):
+    def test_sigterm_and_sighup_request_exit_and_restore_previous_handlers(self):
+        ui = SimpleNamespace(exit_requested=False)
+        signals = (signal.SIGTERM, signal.SIGHUP)
+        previous = {sig: signal.getsignal(sig) for sig in signals}
+
+        with fc.terminal_shutdown_signals(ui):
+            for sig in signals:
+                handler = signal.getsignal(sig)
+                self.assertTrue(callable(handler))
+                ui.exit_requested = False
+                signal.raise_signal(sig)
+                self.assertTrue(ui.exit_requested)
+
+        for sig in signals:
+            self.assertIs(signal.getsignal(sig), previous[sig])
+
+    def test_main_closes_ui_and_restores_handlers_when_curses_fails(self):
+        ui = SimpleNamespace(exit_requested=False, run=Mock(), close=Mock())
+        previous = {sig: signal.getsignal(sig) for sig in
+                    (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
+        with patch.object(fc.sys, "argv", ["fan_curve.py", "--demo"]), \
+             patch.object(fc.sys, "stdin", SimpleNamespace(isatty=lambda: True)), \
+             patch.object(fc.sys, "stdout", SimpleNamespace(isatty=lambda: True)), \
+             patch.object(fc.os, "geteuid", return_value=501), \
+             patch.object(fc.locale, "setlocale"), \
+             patch.object(fc, "TerminalUI", return_value=ui), \
+             patch.object(fc.curses, "wrapper", side_effect=fc.curses.error("screen failed")):
+            result = fc.main()
+
+        self.assertEqual(result, 1)
+        ui.close.assert_called_once_with()
+        for sig, handler in previous.items():
+            self.assertIs(signal.getsignal(sig), handler)
 
 
 class ProtectedInstallTests(unittest.TestCase):
@@ -504,8 +631,29 @@ class TerminalUITests(unittest.TestCase):
                     self.assertIn("Demo: 8 simulated cores", visible)
                 elif mode == "help":
                     self.assertIn("Keyboard shortcuts", visible)
+                    self.assertIn("Switch English / Chinese", visible)
                 else:
                     self.assertIn("Settings  /", visible)
+                if mode == "dashboard":
+                    self.assertIn("[l] EN/ZH", visible)
+
+    def test_toggle_language_saves_app_preference_without_controlling_fans(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(fc, "LANGUAGE", "zh"), \
+             patch.object(fc, "APP_SETTINGS", True), \
+             patch.object(fc, "APP_SUPPORT", Path(directory)):
+            ui = object.__new__(fc.TerminalUI)
+            ui.menu_bar = None
+            hardware = FakeHardware()
+            ui.hardware = hardware
+
+            ui.toggle_language()
+
+            self.assertEqual(fc.LANGUAGE, "en")
+            self.assertEqual((Path(directory) / "language.txt").read_text(encoding="ascii"), "en\n")
+            self.assertFalse(hardware.owns_fans)
+            self.assertEqual(hardware.applied, [])
+            self.assertEqual(hardware.restore_count, 0)
 
     def test_english_dynamic_diagnostics_and_sensor_source(self):
         with patch.object(fc, "LANGUAGE", "en"):
