@@ -271,6 +271,33 @@ class ProtectedInstallTests(unittest.TestCase):
                              f"exec /usr/bin/python3 -I -u {root_script} --helper\n")
             self.assertEqual(run.call_count, 2)
 
+    def test_protected_helper_uses_its_own_copy_of_the_bundled_runtime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths, helper_dir, _, launcher, _ = self._temporary_protected_paths(directory)
+            resources = Path(directory) / "FanCurve.app/Contents/Resources"
+            script = resources / "fan_curve.py"
+            runtime_bin = resources / "python/bin"
+            runtime_bin.mkdir(parents=True)
+            script.write_text("# Intel macOS fan controller\n")
+            executable = runtime_bin / "python3.12"
+            executable.write_text("test runtime")
+            executable.chmod(0o775)
+            (runtime_bin / "python3").symlink_to("python3.12")
+            with paths, patch.object(fc, "__file__", str(script)), \
+                 patch.object(fc, "_require_root_installer", return_value="test-user"), \
+                 patch.object(fc, "_require_protected_directory", side_effect=self._check_test_directory), \
+                 patch.object(fc, "_sudoers_directory_enabled", return_value=True), \
+                 patch.object(fc.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+                fc.install_privileged_helper()
+                command = shlex.split(launcher.read_text().splitlines()[-1])
+                installed = Path(command[1])
+                executable.unlink()
+                self.assertTrue(installed.resolve().is_relative_to(helper_dir.resolve()))
+                self.assertEqual(installed.read_text(), "test runtime")
+                self.assertFalse(installed.stat().st_mode & 0o022)
+                fc.uninstall_privileged_helper()
+                self.assertFalse(installed.exists())
+
     def test_uninstall_removes_only_owned_protected_files_and_preserves_user_data(self):
         with tempfile.TemporaryDirectory() as directory:
             path_patch, helper_dir, root_script, launcher, sudoers = self._temporary_protected_paths(directory)

@@ -959,7 +959,7 @@ class HelperClient:
             executable = str(Path(sys.executable).resolve())
             script = str(Path(__file__).resolve())
             # Argument vector, not shell interpolation. sudo owns the password prompt.
-            command = ["/usr/bin/sudo", "-n", executable, "-I", "-u", script, "--helper"]
+            command = ["/usr/bin/sudo", "-n", executable, "-IB", "-u", script, "--helper"]
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.pending = b""
@@ -1175,7 +1175,7 @@ class MenuBarClient:
     """Keep AppKit on a separate process's main thread, away from curses."""
     def __init__(self) -> None:
         self.process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--menu-bar", "--lang", LANGUAGE],
+            [sys.executable, "-IB", str(Path(__file__).resolve()), "--menu-bar", "--lang", LANGUAGE],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             start_new_session=True)
         self.last_state: tuple[float | None, bool, bool] | None = None
@@ -1935,6 +1935,16 @@ end run
 '''
 
 
+def bundled_python(script: Path) -> Path | None:
+    resources = script.parent
+    if (resources.name, resources.parent.name, resources.parent.parent.suffix) == (
+            "Resources", "Contents", ".app"):
+        interpreter = resources / "python/bin/python3"
+        if interpreter.is_file():
+            return interpreter
+    return None
+
+
 def launch_terminal(script_path: Path | None = None, home: Path | None = None,
                     language: str | None = None, mode: str | None = None,
                     start_hidden: bool = False, uv_path: str | None = None) -> str:
@@ -1947,13 +1957,17 @@ def launch_terminal(script_path: Path | None = None, home: Path | None = None,
         raise FanError("Unsupported launch option.")
     profile = write_terminal_profile(home)
     migrate_app_config(script, home)
-    uv_executable = uv_path if uv_path is not None else shutil.which("uv")
-    if uv_executable is None:
+    interpreter = bundled_python(script)
+    uv_executable = None if interpreter else (uv_path if uv_path is not None else shutil.which("uv"))
+    if interpreter is None and uv_executable is None:
         local_uv = Path.home() / ".local/bin/uv"
         if local_uv.is_file() and os.access(local_uv, os.X_OK):
             uv_executable = str(local_uv)
-    command = ([uv_executable, "run", "--no-project", str(script)] if uv_executable else
-               [sys.executable, str(script)])
+    if interpreter:
+        command = [str(interpreter), "-IB", str(script)]
+    else:
+        command = ([uv_executable, "run", "--no-project", str(script)] if uv_executable else
+                   [sys.executable, str(script)])
     command += ["--lang", selected_language, "--app-settings"]
     if mode:
         command.append(f"--{mode}")
@@ -2046,6 +2060,8 @@ def install_privileged_helper() -> None:
 
     policy = _sudoers_policy(username)
     descriptor, staged = tempfile.mkstemp(prefix=".fancurve-", dir=SUDOERS_FILE.parent)
+    runtime_copy = None
+    launcher_written = False
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(policy)
@@ -2057,11 +2073,27 @@ def install_privileged_helper() -> None:
         if checked.returncode:
             raise FanError("sudoers 规则校验失败：" + (checked.stderr or checked.stdout).strip())
 
-        source = Path(__file__).resolve().read_bytes()
+        script = Path(__file__).resolve()
+        source = script.read_bytes()
+        interpreter = bundled_python(script)
+        if interpreter:
+            # The passwordless launcher must never execute code from a user-writable app.
+            runtime_copy = Path(tempfile.mkdtemp(prefix="python-runtime-", dir=ROOT_HELPER_DIR)).resolve()
+            shutil.copytree(interpreter.parent.parent, runtime_copy, symlinks=True, dirs_exist_ok=True)
+            for path in (runtime_copy, *runtime_copy.rglob("*")):
+                if path.is_symlink():
+                    if Path(os.readlink(path)).is_absolute() or not path.resolve().is_relative_to(runtime_copy):
+                        raise FanError(f"Invalid bundled runtime link: {path.name}")
+                else:
+                    path.chmod(stat.S_IMODE(path.stat().st_mode) & 0o755)
+            runtime_command = f"{shlex.quote(str(runtime_copy / 'bin/python3'))} -IB"
+        else:
+            runtime_command = "/usr/bin/python3 -I"
         launcher = ("#!/bin/sh\n" + ROOT_LAUNCHER_MARKER + "\n" +
-                    f"exec /usr/bin/python3 -I -u {shlex.quote(str(ROOT_SCRIPT))} --helper\n")
+                    f"exec {runtime_command} -u {shlex.quote(str(ROOT_SCRIPT))} --helper\n")
         _atomic_write(ROOT_SCRIPT, source, 0o644)
         _atomic_write(ROOT_LAUNCHER, launcher.encode("utf-8"), 0o755)
+        launcher_written = True
         os.replace(staged, SUDOERS_FILE)
         checked = subprocess.run(["/usr/sbin/visudo", "-c", "-f", "/private/etc/sudoers"],
                                  capture_output=True, text=True, check=False)
@@ -2072,6 +2104,8 @@ def install_privileged_helper() -> None:
                 _atomic_write(SUDOERS_FILE, previous_policy, 0o440)
             raise FanError("系统 sudoers 校验失败，已撤回规则：" + (checked.stderr or checked.stdout).strip())
     finally:
+        if runtime_copy and not launcher_written:
+            shutil.rmtree(runtime_copy)
         if os.path.exists(staged):
             os.unlink(staged)
 
@@ -2092,6 +2126,9 @@ def uninstall_privileged_helper() -> None:
     ROOT_LAUNCHER.unlink(missing_ok=True)
     if ROOT_SCRIPT.exists():
         ROOT_SCRIPT.unlink()
+    for runtime in ROOT_HELPER_DIR.glob("python-runtime-*"):
+        _require_protected_directory(runtime)
+        shutil.rmtree(runtime)
     if ROOT_HELPER_DIR.exists() and not any(ROOT_HELPER_DIR.iterdir()):
         ROOT_HELPER_DIR.rmdir()
 
@@ -2121,12 +2158,14 @@ def _run_privileged_installer(mode: str) -> None:
         raise FanError("无人值守调速安装仅支持 macOS。")
     if not sys.stdin.isatty():
         raise FanError("一次性管理员安装需要终端，请在 Terminal 中运行此命令。")
-    interpreter = Path("/usr/bin/python3")
-    _require_system_python(interpreter)
+    interpreter = bundled_python(Path(__file__).resolve())
+    if interpreter is None:
+        interpreter = Path("/usr/bin/python3")
+        _require_system_python(interpreter)
     print("\n" + translate_text("FanCurve 需要一次管理员授权，以安装仅允许启动受保护控制服务的规则。") + "\n", flush=True)
     if subprocess.run(["/usr/bin/sudo", "-v"], check=False).returncode:
         raise FanError("管理员授权取消或失败，未完成安装。")
-    command = ["/usr/bin/sudo", "-n", str(interpreter), "-I", "-u", str(Path(__file__).resolve()),
+    command = ["/usr/bin/sudo", "-n", str(interpreter), "-IB", "-u", str(Path(__file__).resolve()),
                mode, "--lang", LANGUAGE]
     if subprocess.run(command, check=False).returncode:
         raise FanError("受保护控制服务安装失败，请查看上面的错误信息。")
@@ -2152,10 +2191,14 @@ def install_login_agent(script_path: Path | None = None, home: Path | None = Non
     if launcher_path.exists() and LOGIN_LAUNCHER_MARKER not in launcher_path.read_text(encoding="utf-8"):
         raise FanError(f"现有启动器不属于 FanCurve，未覆盖：{launcher_path}")
 
-    uv_executable = uv_path if uv_path is not None else shutil.which("uv")
-    command = (f"{shlex.quote(str(Path(uv_executable).resolve()))} run --no-project "
-               f"{shlex.quote(str(script))}" if uv_executable else
-               f"{shlex.quote(str(Path(sys.executable).resolve()))} {shlex.quote(str(script))}")
+    interpreter = bundled_python(script)
+    uv_executable = None if interpreter else (uv_path if uv_path is not None else shutil.which("uv"))
+    if interpreter:
+        command = shlex.join([str(interpreter), "-IB", str(script)])
+    elif uv_executable:
+        command = shlex.join([str(Path(uv_executable).resolve()), "run", "--no-project", str(script)])
+    else:
+        command = shlex.join([str(Path(sys.executable).resolve()), str(script)])
     selected_language = language or LANGUAGE
     if selected_language not in ("zh", "en"):
         raise FanError("Unsupported language.")

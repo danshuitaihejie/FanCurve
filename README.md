@@ -29,13 +29,14 @@ If `git` is unavailable, download this repository as a ZIP from GitHub. You can 
 
 ## macOS app package
 
-On macOS with `/usr/bin/python3` 3.9 or newer and Command Line Tools installed, build a local app and ZIP package with:
+To build the app and ZIP on macOS, install the portable Intel Python runtime with uv, then build:
 
 ```sh
+uv python install cpython-3.12-macos-x86_64-none
 UV_CACHE_DIR=.work/uv-cache uv run --no-project build_app.py
 ```
 
-This creates `dist/FanCurve.app` and `dist/FanCurve-macOS.zip`. The app is a macOS `.app` launcher that bundles the script and opens the Terminal TUI plus menu bar app; it uses the system `/usr/bin/python3`, not an embedded Python runtime. You can drag `FanCurve.app` into Applications. On first launch it creates `~/Library/Application Support/FanCurve/FanCurve.terminal` and imports a dedicated Terminal profile named FanCurve. That profile uses a 100×32 window, closes without prompting, and closes the window after a normal program exit. FanCurve selects English or Chinese from the system language or saved app preference by default. Press `l` in the interface to switch languages and save the preference. Only the dedicated FanCurve profile is changed.
+This creates `dist/FanCurve.app` and `dist/FanCurve-macOS.zip`. The app includes a portable Python runtime and opens the Terminal interface and menu bar indicator. Users of the packaged app can launch it without installing Python, uv, or Command Line Tools. You can drag `FanCurve.app` into Applications. On first launch it creates `~/Library/Application Support/FanCurve/FanCurve.terminal` and imports a dedicated Terminal profile named FanCurve. That profile uses a 100×32 window, closes without prompting, and closes the window after a normal program exit. FanCurve selects English or Chinese from the system language or saved app preference by default. Press `l` in the interface to switch languages and save the preference. Only the dedicated FanCurve profile is changed.
 
 The app stores settings in `~/Library/Application Support/FanCurve/settings.json`. Direct TUI commands keep settings in `.fancurve.json` beside the script. To launch the app through its dedicated Terminal profile from the source checkout, run `uv run --no-project fan_curve.py --launch-app --lang en`; the plain TUI commands above remain available. Packages are local ad hoc-signed builds and are not Developer ID signed or notarized, and are not distributed through the App Store.
 
@@ -64,9 +65,16 @@ Do not let another fan-control app control the same fans at the same time. If Ma
 
 ## Optional unattended login startup
 
-`--install` sets up a protected helper and a per-user login item. It needs one administrator authorization. The Mac must provide `/usr/bin/python3` 3.9 or newer; if macOS prompts to install Command Line Tools, finish that installation first. The system sudoers file must include `/private/etc/sudoers.d`.
+`--install` sets up a protected helper and a per-user login item. It needs one administrator authorization. The packaged app copies its bundled runtime into the root-owned helper directory. For a source-only installation, system Python 3.9 or newer is required. The system sudoers file must include `/private/etc/sudoers.d`.
 
-Keep `fan_curve.py` in its final location, then run:
+With the app installed in `/Applications`, run:
+
+```sh
+"/Applications/FanCurve.app/Contents/Resources/python/bin/python3" -IB \
+  "/Applications/FanCurve.app/Contents/Resources/fan_curve.py" --install --lang en
+```
+
+For a source checkout, keep `fan_curve.py` in its final location, then run:
 
 ```sh
 uv run --no-project fan_curve.py --install --lang en
@@ -82,7 +90,7 @@ If you move the script, change the startup language, or update helper logic, run
 uv run --no-project fan_curve.py --uninstall --lang en
 ```
 
-Uninstall requires administrator authorization and leaves the original script and `.fancurve.json` configuration intact.
+For the packaged app, use the same bundled Python command with `--uninstall` in place of `--install`. Uninstall requires administrator authorization and leaves the original script and `.fancurve.json` configuration intact.
 
 ## Failure behavior and diagnostics
 
@@ -93,7 +101,7 @@ uv run --no-project fan_curve.py --probe --lang en     # Read-only hardware JSON
 uv run --no-project fan_curve.py --simulate --lang en  # Print a simulated curve
 ```
 
-Direct TUI settings live beside the script in `.fancurve.json`; the packaged app uses `~/Library/Application Support/FanCurve/settings.json`. FanCurve implements the SMC interface independently with Python `ctypes`, with [SMCKit](https://github.com/beltex/SMCKit) as an ABI reference. It only supports Intel Macs running macOS, with `/usr/bin/python3` 3.9 or newer and Command Line Tools.
+Direct TUI settings live beside the script in `.fancurve.json`; the packaged app uses `~/Library/Application Support/FanCurve/settings.json`. FanCurve implements the SMC interface independently with Python `ctypes`, with [SMCKit](https://github.com/beltex/SMCKit) as an ABI reference. It only supports Intel Macs running macOS.
 
 Run the tests with:
 

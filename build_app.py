@@ -12,7 +12,8 @@ import tempfile
 
 
 BUNDLE_ID = "com.fancurve.app"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
+RUNTIME_REQUEST = "cpython-3.12-macos-x86_64-none"
 
 
 def build_app(output: Path, mode: str | None = None, sign: str = "-", archive: bool = True) -> Path:
@@ -22,6 +23,11 @@ def build_app(output: Path, mode: str | None = None, sign: str = "-", archive: b
         raise ValueError("Use an ASCII application filename ending in .app.")
     if mode not in (None, "demo", "monitor"):
         raise ValueError("Unsupported application mode.")
+    runtime = subprocess.run(["uv", "python", "find", "--managed-python", RUNTIME_REQUEST],
+                             capture_output=True, text=True, check=False)
+    if runtime.returncode:
+        raise RuntimeError(f"Install the portable runtime with: uv python install {RUNTIME_REQUEST}")
+    runtime_dir = Path(runtime.stdout.strip()).resolve().parent.parent
     output = output.resolve()
     if output.exists():
         info = plistlib.loads((output / "Contents/Info.plist").read_bytes())
@@ -39,8 +45,9 @@ end reopen
 
 on launchFanCurve()
     set scriptPath to POSIX path of (path to resource "fan_curve.py")
+    set pythonPath to POSIX path of (path to resource "python")
     try
-        do shell script "/usr/bin/python3 -I " & quoted form of scriptPath & " --launch-app --lang autoMODE"
+        do shell script quoted form of (pythonPath & "/bin/python3") & " -IB " & quoted form of scriptPath & " --launch-app --lang autoMODE"
     on error errorMessage number errorNumber
         display alert "FanCurve" message errorMessage as critical
     end try
@@ -55,6 +62,12 @@ end launchFanCurve
         bundle = staging / output.name
         subprocess.run(["/usr/bin/osacompile", "-o", str(bundle), str(source_path)], check=True)
         resources = bundle / "Contents/Resources"
+        bundled_runtime = resources / "python"
+        shutil.copytree(runtime_dir, bundled_runtime, symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "site-packages"))
+        subprocess.run([str(bundled_runtime / "bin/python3"), "-IB", "-c",
+                        "import ctypes, curses, platform; assert platform.machine() == 'x86_64'"],
+                       check=True)
         project = Path(__file__).resolve().parent
         for filename in ("fan_curve.py", "LICENSE", "README.md", "README.zh-CN.md"):
             shutil.copy2(project / filename, resources / filename)

@@ -29,19 +29,27 @@ uv run --no-project fan_curve.py --demo --lang zh
 
 ### macOS app
 
-在安装了命令行工具、并且 `/usr/bin/python3` 版本为 3.9 或更高的 macOS 上运行以下命令构建本地 app 和 ZIP：
+在 macOS 上构建时，用 uv 安装可移植的 Intel 版 Python，再构建应用和 ZIP。
 
 ```sh
+uv python install cpython-3.12-macos-x86_64-none
 UV_CACHE_DIR=.work/uv-cache uv run --no-project build_app.py
 ```
 
-命令会生成 `dist/FanCurve.app` 和 `dist/FanCurve-macOS.zip`。app 是包含脚本的 macOS `.app` 启动器，会打开 Terminal TUI 和菜单栏程序；它使用系统的 `/usr/bin/python3`，不包含独立嵌入式 Python。可将 `FanCurve.app` 拖入 Applications。首次启动时会创建 `~/Library/Application Support/FanCurve/FanCurve.terminal`，并导入专属的 FanCurve Terminal 描述文件。该描述文件使用 100×32 窗口、关闭时不询问，并在程序正常退出后自动关闭窗口；只会使用 FanCurve 专属描述文件。app 默认根据系统语言或已保存偏好选择中英文，在界面按 `l` 可切换并保存偏好。
+命令会生成 `dist/FanCurve.app` 和 `dist/FanCurve-macOS.zip`。应用自带可移植 Python，会打开终端界面和菜单栏温度显示。使用打包版无需另装 Python、uv 或命令行工具。可将 `FanCurve.app` 拖入 Applications。首次启动时会创建 `~/Library/Application Support/FanCurve/FanCurve.terminal`，并导入专属的 FanCurve Terminal 描述文件。该描述文件使用 100×32 窗口、关闭时不询问，并在程序正常退出后自动关闭窗口；只会使用 FanCurve 专属描述文件。app 默认根据系统语言或已保存偏好选择中英文，在界面按 `l` 可切换并保存偏好。
 
 app 设置保存在 `~/Library/Application Support/FanCurve/settings.json`；直接运行 TUI 命令时仍使用脚本旁的 `.fancurve.json`。从源码目录运行 `uv run --no-project fan_curve.py --launch-app --lang en` 也会通过专属描述文件启动 app；直接运行 TUI 的命令仍可使用。生成包为本地 ad hoc 签名，未使用 Developer ID 签名或公证，也不通过 App Store 分发。
 
 ## 登录时启动
 
-需要 macOS 自带的 `/usr/bin/python3` 版本不低于 3.9，并且 `/private/etc/sudoers` 已启用 `/private/etc/sudoers.d`（通常是 `#includedir /private/etc/sudoers.d`）。如果首次运行触发 `xcode-select` 安装提示，请先完成 macOS 命令行工具安装，再重新运行；Python 无法启动与版本过旧会分别提示。将 `fan_curve.py` 复制到 Intel Mac 上希望长期保存的位置，然后在 Terminal 中运行：
+登录自启需要一次管理员授权，系统 sudoers 须启用 `/private/etc/sudoers.d`。打包版会把自带 Python 复制到 root 持有的 helper 目录。将应用放到「应用程序」后，可运行下面的命令。卸载时把 `--install` 换成 `--uninstall`。
+
+```sh
+"/Applications/FanCurve.app/Contents/Resources/python/bin/python3" -IB \
+  "/Applications/FanCurve.app/Contents/Resources/fan_curve.py" --install --lang zh
+```
+
+从源码安装时，仍需系统 Python 3.9 或更高版本。将 `fan_curve.py` 放到长期保存的位置，再运行：
 
 ```sh
 uv run --no-project fan_curve.py --install --lang zh
@@ -100,4 +108,4 @@ UV_CACHE_DIR=.work/uv-cache uv run --no-project -m unittest discover -s tests -v
 
 测试覆盖由 `tests/test_fan_curve.py` 提供，包括仅在临时目录中构建和移除受保护安装文件的测试。硬件写入需管理员授权；文档中的模拟和只读诊断不代表已完成真实设备风扇写入验证。
 
-SMC 接口结构参考 [SMCKit](https://github.com/beltex/SMCKit)，通过 Python `ctypes` 独立实现。核心温度不可用时会采用 CPU 封装传感器，并在界面中注明。直接运行 TUI 时配置保存在程序旁的 `.fancurve.json`；app 设置保存在 `~/Library/Application Support/FanCurve/settings.json`。普通模式每次启动都会重新请求自动调速授权，已安装受保护 helper 时登录后可无人值守开启。构建与运行需要 macOS、`/usr/bin/python3` 3.9 或更高版本和命令行工具。
+SMC 接口结构参考 [SMCKit](https://github.com/beltex/SMCKit)，通过 Python `ctypes` 独立实现。核心温度不可用时会采用 CPU 封装传感器，并在界面中注明。直接运行 TUI 时配置保存在程序旁的 `.fancurve.json`；app 设置保存在 `~/Library/Application Support/FanCurve/settings.json`。普通模式每次启动都会重新请求自动调速授权，已安装受保护 helper 时登录后可无人值守开启。
